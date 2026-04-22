@@ -152,7 +152,10 @@ class ObjectAligner:
                 aligned_scores.append(MatchItem(0.0, gold=None, pred=pred[ci]))
 
         D = self._list_norm(aligned_gold, aligned_pred, schema)
-        score = np.sum([s.score for s in aligned_scores]) / D
+        if D == 0:
+            score = 1.0 if len(aligned_scores) == 0 else 0.0
+        else:
+            score = np.sum([s.score for s in aligned_scores]) / D
         return {"gold": aligned_gold, "pred": aligned_pred, "match": MatchList(score=score, children=aligned_scores)}
 
 
@@ -233,7 +236,10 @@ class ObjectAligner:
         
         assert len(aligned_gold) == len(aligned_pred)
         D = self._list_norm(aligned_gold, aligned_pred, schema)
-        score = dp[n][m] / D
+        if D == 0:
+            score = 1.0 if len(aligned_scores) == 0 else 0.0
+        else:
+            score = dp[n][m] / D
         return {"gold": aligned_gold, "pred": aligned_pred, "match": MatchList(score=score, children=aligned_scores)}
 
 
@@ -305,6 +311,9 @@ class ObjectAligner:
         
         gkeys = list(g.keys())
         pkeys = list(p.keys())
+
+        if len(gkeys) == 0 and len(pkeys) == 0:
+            return {"gold": {}, "pred": {}, "match": MatchDict(score=1.0, children={})}
             
         n, m = len(gkeys), len(pkeys)
         d = max(n, m)

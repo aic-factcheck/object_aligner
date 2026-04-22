@@ -216,6 +216,7 @@ The number of items used for score normalization (the denominator) depends on `i
 | `ignoreMissing: true` | Exclude rows where pred is `None` |
 
 This means `ignoreExcess` + `ignoreMissing` = normalize only over successfully paired items.
+If both flags are `true` and no items can be paired at all, the score is `0.0` for non-empty mismatched lists; only `[]` vs `[]` scores `1.0`.
 
 ---
 

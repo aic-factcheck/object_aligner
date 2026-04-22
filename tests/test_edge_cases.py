@@ -108,7 +108,6 @@ def test_large_fuzzy_dict_alignment_handles_many_keys():
     assert aligner.align(gold, pred, skip_validation=True).score > 0.9
 
 
-@pytest.mark.xfail(reason="current implementation returns NaN for empty-empty dict alignment")
 def test_empty_dict_alignment_is_known_issue():
     aligner = ObjectAligner("empty-dict", {"type": "object", "properties": {}, "keyScore": "exact"})
     assert aligner.metric({}, {})["score"] == 1.0

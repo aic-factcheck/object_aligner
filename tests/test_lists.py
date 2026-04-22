@@ -185,7 +185,6 @@ def test_ignore_excess_and_ignore_missing_change_list_normalization():
     assert ignore_both.align(["a"], ["a", "b"]).score == 1.0
 
 
-@pytest.mark.xfail(reason="current implementation divides by zero when both ignore flags are true and no items overlap")
 def test_ignore_excess_and_ignore_missing_with_total_mismatch_is_known_issue():
     aligner = ObjectAligner(
         "ignore-both-total-mismatch",

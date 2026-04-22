@@ -3,6 +3,7 @@
 Object Aligner matches dictionaries by **aligning keys first**, then recursively aligning the corresponding values. The key alignment uses the Hungarian algorithm to find the best pairing between gold keys and predicted keys — just like reorder alignment for lists.
 
 The result is a `MatchDict` with a `score` and a `children` dict that maps **key-level** `MatchItem`s to **value-level** match objects.
+As a simple edge case, an empty dict aligned with an empty dict scores `1.0`.
 
 ---
 
