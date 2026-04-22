@@ -12,13 +12,8 @@ from object_aligner import ObjectAligner
 schema = {"type": "boolean"}
 aligner = ObjectAligner(schema)
 
-# Perfect match
-result = aligner.align(True, True)
-print(result)  # MatchItem(score=1.0, gold=True, pred=True)
-
-# Mismatch
-result = aligner.align(True, False)
-print(result)  # MatchItem(score=0.0, gold=True, pred=False)
+print(aligner.align(True, True))   # MatchItem(score=1.0, gold=True, pred=True)
+print(aligner.align(True, False))  # MatchItem(score=0.0, gold=True, pred=False)
 ```
 
 ### Schema keywords
@@ -33,18 +28,18 @@ No scoring options — booleans are always compared exactly.
 
 ## Numbers (integers and floats)
 
-Numbers support two scoring modes:
+Numbers support two built-in scoring modes:
 
 ### Exact match (`"exact"`)
 
-Returns 1.0 if the values are equal, 0.0 otherwise. Best for categorical or identifier numbers where any difference is fatal.
+Returns `1.0` if the values are equal, `0.0` otherwise. Best for categorical or identifier numbers where any difference is fatal.
 
 ```python
 schema = {"type": "integer", "score": "exact"}
 aligner = ObjectAligner(schema)
 
-print(aligner.align(42, 42))   # MatchItem(score=1.0, gold=42, pred=42)
-print(aligner.align(42, 43))   # MatchItem(score=0.0, gold=42, pred=43)
+print(aligner.align(42, 42))
+print(aligner.align(42, 43))
 ```
 
 ### Inverse difference (`"invdiff"`) — *default*
@@ -55,102 +50,160 @@ Returns `1 / (1 + |a - b|)`. This gives a smooth penalty for numeric differences
 schema = {"type": "integer", "score": "invdiff"}
 aligner = ObjectAligner(schema)
 
-print(aligner.align(50, 51))   # score ≈ 0.5  (1 / (1 + 1))
-print(aligner.align(50, 52))   # score ≈ 0.33 (1 / (1 + 2))
-print(aligner.align(50, 100))  # score ≈ 0.02 (1 / (1 + 50))
-print(aligner.align(50, 50))   # score = 1.0
+print(aligner.align(50, 51))
+print(aligner.align(50, 52))
+print(aligner.align(50, 100))
+print(aligner.align(50, 50))
 ```
-
-This is particularly useful for evaluating numerical predictions like ages, prices, or measurements where being "close" is meaningful.
 
 ### Threshold
 
-You can set a `threshold` (default 0.0) to zero out scores below it. This acts as a hard cutoff: any similarity below the threshold is treated as a complete mismatch.
+You can set a `threshold` (default `0.0`) to zero out scores below it.
 
 ```python
 schema = {"type": "integer", "score": "invdiff", "threshold": 0.5}
 aligner = ObjectAligner(schema)
 
-# |50 - 51| = 1 → 1/(1+1) = 0.5, which is not < 0.5, so it passes
-print(aligner.align(50, 51))  # MatchItem(score=0.5, gold=50, pred=51)
-
-# |50 - 52| = 2 → 1/(1+2) ≈ 0.33, which is < 0.5, so it becomes 0.0
-print(aligner.align(50, 52))  # MatchItem(score=0.0, gold=50, pred=52)
+print(aligner.align(50, 51))  # score = 0.5
+print(aligner.align(50, 52))  # score = 0.0
 ```
+
+### Custom numeric metrics
+
+You can register your own named metric through `ObjectAligner(..., custom_metrics=...)`. The schema still references it by name through `score`.
+
+Metric callables must have signature `(gold, pred) -> float` and return a value in `[0, 1]`.
+
+```python
+from object_aligner import ObjectAligner
+
+
+def closish(gold: float, pred: float) -> float:
+    return 0.8 if abs(gold - pred) <= 2 else 0.2
+
+
+aligner = ObjectAligner(
+    {"type": "number", "score": "closish", "threshold": 0.5},
+    custom_metrics={"number": {"closish": closish}},
+)
+
+print(aligner.align(10, 12))  # score = 0.8
+print(aligner.align(10, 20))  # score = 0.0 after thresholding
+```
+
+Integer schemas use the `integer` registry first and then fall back to the `number` registry.
 
 ### Schema keywords
 
 | Keyword | Type | Default | Description |
 |---------|------|---------|-------------|
 | `type` | string | *(required)* | `"integer"` or `"number"` |
-| `score` | string | `"invdiff"` | `"exact"` or `"invdiff"` |
-| `threshold` | float | `0.0` | Minimum score to be considered a match; scores below are set to 0.0 |
+| `score` | string | `"invdiff"` | `"exact"`, `"invdiff"`, or a registered custom metric name |
+| `threshold` | float | `0.0` | Minimum score to be considered a match; scores below are set to `0.0` |
 
 ---
 
 ## Strings
 
-Strings support two scoring modes:
+Strings support these built-in scoring modes:
+
+- `jaro` *(default)*
+- `jaro_winkler`
+- `levenshtein`
+- `damerau_levenshtein`
+- `osa`
+- `indel`
+- `lcsseq`
+- `exact`
+
+All built-in scores return values in `[0, 1]`.
 
 ### Jaro similarity (`"jaro"`) — *default*
 
-Uses the [Jaro similarity](https://en.wikipedia.org/wiki/Jaro%E2%80%93Winkler_distance) from `rapidfuzz`. It accounts for character transpositions and partial matches, making it ideal for names, labels, and other short strings where typos are common.
+Good for names, labels, and short text with typos or transpositions.
 
 ```python
 schema = {"type": "string", "score": "jaro"}
 aligner = ObjectAligner(schema)
 
-print(aligner.align("hello", "hallo"))    # score ≈ 0.87
-print(aligner.align("Katherine", "Catherine"))  # score ≈ 0.92
-print(aligner.align("hello", "world"))    # score = 0.0
+print(aligner.align("hello", "hallo"))
+print(aligner.align("Katherine", "Catherine"))
+print(aligner.align("hello", "world"))
+```
+
+### Other built-in string metrics
+
+| Score | Good for |
+|------|----------|
+| `exact` | Strict equality, IDs, enums, categorical values |
+| `jaro_winkler` | Like Jaro, but gives extra weight to shared prefixes |
+| `levenshtein` | Classic edit distance similarity |
+| `damerau_levenshtein` | Edit distance that treats adjacent transpositions naturally |
+| `osa` | Optimal string alignment, another transposition-aware edit metric |
+| `indel` | Insert/delete-oriented similarity |
+| `lcsseq` | Similarity based on longest common subsequence |
+
+```python
+schema = {"type": "string", "score": "damerau_levenshtein"}
+aligner = ObjectAligner(schema)
+
+print(aligner.align("abcd", "abdc"))
+print(aligner.align("kitten", "sitting"))
 ```
 
 ### Exact match (`"exact"`)
 
-Returns 1.0 if the strings are identical, 0.0 otherwise. Use when you need strict matching (e.g., enum values, IDs).
+Returns `1.0` if the strings are identical, `0.0` otherwise.
 
 ```python
 schema = {"type": "string", "score": "exact"}
 aligner = ObjectAligner(schema)
 
-print(aligner.align("hello", "hello"))  # MatchItem(score=1.0, ...)
-print(aligner.align("hello", "Hello"))  # MatchItem(score=0.0, ...)
+print(aligner.align("hello", "hello"))
+print(aligner.align("hello", "Hello"))
 ```
 
-> **Note:** Jaro similarity is case-sensitive. `"hello"` vs `"Hello"` will not score 1.0.
+> **Note:** String metrics are case-sensitive unless your custom metric chooses otherwise.
 
 ### Threshold
 
-Same as for numbers — scores below the threshold are set to 0.0:
+Scores below `threshold` are set to `0.0`.
 
 ```python
-schema = {"type": "string", "score": "jaro", "threshold": 0.7}
+schema = {"type": "string", "score": "levenshtein", "threshold": 0.7}
 aligner = ObjectAligner(schema)
 
-# "cat" vs "car" has Jaro similarity ≈ 0.78 → above threshold
-print(aligner.align("cat", "car"))   # score ≈ 0.78
-
-# "cat" vs "dog" has Jaro similarity ≈ 0.0 → below threshold → 0.0
-print(aligner.align("cat", "dog"))   # score = 0.0
+print(aligner.align("abcd", "abce"))  # score = 0.75
+print(aligner.align("abcd", "abdc"))  # score = 0.0 after thresholding
 ```
 
-### Real-world example: Matching person names
+### Custom string metrics
+
+Custom metrics use the same registration pattern as numeric metrics.
 
 ```python
-schema = {"type": "string", "score": "jaro", "threshold": 0.5}
-aligner = ObjectAligner(schema)
+from object_aligner import ObjectAligner
 
-# Common name variations
-print(aligner.align("Elizabeth", "Elisabeth"))  # score ≈ 0.97
-print(aligner.align("Jonathan", "Jonathon"))    # score ≈ 0.97
-print(aligner.align("Margaret", "Margarret"))   # score ≈ 0.96
-print(aligner.align("Bob", "Robert"))           # score ≈ 0.0 (too different → thresholded)
+
+def semantic_toy(gold: str, pred: str) -> float:
+    return 0.95 if gold.lower()[0] == pred.lower()[0] else 0.2
+
+
+aligner = ObjectAligner(
+    {"type": "string", "score": "semantic_toy", "threshold": 0.5},
+    custom_metrics={"string": {"semantic_toy": semantic_toy}},
+)
+
+print(aligner.align("cat", "car"))
+print(aligner.align("cat", "dog"))
 ```
+
+This same mechanism can later be used for embedding-based or other semantic similarity functions.
 
 ### Schema keywords
 
 | Keyword | Type | Default | Description |
 |---------|------|---------|-------------|
 | `type` | string | *(required)* | Must be `"string"` |
-| `score` | string | `"jaro"` | `"jaro"` or `"exact"` |
-| `threshold` | float | `0.0` | Minimum score; scores below are set to 0.0 |
+| `score` | string | `"jaro"` | Any built-in string score or a registered custom metric name |
+| `threshold` | float | `0.0` | Minimum score; scores below are set to `0.0` |

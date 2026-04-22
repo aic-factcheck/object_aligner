@@ -22,7 +22,7 @@ result = aligner.metric(gold, pred, debug=False, generate_reasoning=None)
 |-----------|------|---------|-------------|
 | `gold` | any | *(required)* | Ground truth object |
 | `pred` | any | *(required)* | Predicted object |
-| `debug` | bool | `False` | *(currently unused)* |
+| `debug` | bool | `False` | If `True`, include a structured `"debug"` alignment tree made only of basic Python container/scalar types |
 | `generate_reasoning` | `bool | None` | `None` | Per-call override. `None` uses the constructor default. |
 
 ### Return value
@@ -37,6 +37,19 @@ When reasoning is enabled, it returns:
 
 ```python
 {"score": 0.87, "reasoning": "..."}
+```
+
+When `debug=True`, it also includes a structured alignment tree:
+
+```python
+{
+    "score": 0.87,
+    "debug": {
+        "kind": "list",
+        "score": 0.87,
+        "children": [...],
+    },
+}
 ```
 
 ---

@@ -87,6 +87,35 @@ def test_string_jaro_mode_covers_classic_cases():
     assert aligner.align("abc", "").score == 0.0
 
 
+@pytest.mark.parametrize(
+    "metric_name",
+    [
+        "jaro_winkler",
+        "levenshtein",
+        "damerau_levenshtein",
+        "osa",
+        "indel",
+        "lcsseq",
+    ],
+)
+def test_new_builtin_string_metrics_accept_representative_inputs(metric_name):
+    aligner = ObjectAligner({"type": "string", "score": metric_name})
+
+    assert aligner.align("hello", "hello").score == 1.0
+    assert aligner.align("abc", "").score == 0.0
+    assert 0.0 <= aligner.align("kitten", "sitting").score <= 1.0
+
+
+def test_transposition_metrics_score_transpositions_better_than_plain_levenshtein():
+    levenshtein = ObjectAligner({"type": "string", "score": "levenshtein"})
+    damerau = ObjectAligner({"type": "string", "score": "damerau_levenshtein"})
+    osa = ObjectAligner({"type": "string", "score": "osa"})
+
+    lev_score = levenshtein.align("abcd", "abdc").score
+    assert damerau.align("abcd", "abdc").score > lev_score
+    assert osa.align("abcd", "abdc").score > lev_score
+
+
 def test_string_threshold_zeroes_out_below_cutoff_and_keeps_boundary():
     aligner = ObjectAligner({"type": "string", "score": "jaro", "threshold": 0.7})
     boundary = similarity_string_jaro("cat", "car")
@@ -94,6 +123,96 @@ def test_string_threshold_zeroes_out_below_cutoff_and_keeps_boundary():
     assert boundary > 0.7
     assert aligner.align("cat", "car").score == pytest.approx(boundary)
     assert aligner.align("cat", "dog").score == 0.0
+
+
+def test_threshold_applies_to_nondefault_builtin_string_metrics():
+    aligner = ObjectAligner({"type": "string", "score": "levenshtein", "threshold": 0.7})
+
+    assert aligner.align("abcd", "abce").score == pytest.approx(0.75)
+    assert aligner.align("abcd", "abdc").score == 0.0
+
+
+def test_custom_string_metric_is_resolved_by_name_and_thresholded():
+    def first_letter_bonus(gold, pred):
+        return 0.9 if gold[:1] == pred[:1] else 0.4
+
+    aligner = ObjectAligner(
+        {"type": "string", "score": "first_letter_bonus", "threshold": 0.5},
+        custom_metrics={"string": {"first_letter_bonus": first_letter_bonus}},
+    )
+
+    assert aligner.align("cat", "car").score == 0.9
+    assert aligner.align("cat", "dog").score == 0.0
+
+
+def test_custom_number_metric_is_resolved_by_name():
+    def closish(gold, pred):
+        return 0.8 if abs(gold - pred) <= 2 else 0.2
+
+    aligner = ObjectAligner(
+        {"type": "number", "score": "closish"},
+        custom_metrics={"number": {"closish": closish}},
+    )
+
+    assert aligner.align(10, 12).score == 0.8
+    assert aligner.align(10, 20).score == 0.2
+
+
+def test_integer_schema_falls_back_to_number_custom_metric_and_can_be_overridden():
+    def number_metric(gold, pred):
+        return 0.6
+
+    def integer_metric(gold, pred):
+        return 0.9
+
+    fallback = ObjectAligner(
+        {"type": "integer", "score": "parityish"},
+        custom_metrics={"number": {"parityish": number_metric}},
+    )
+    override = ObjectAligner(
+        {"type": "integer", "score": "parityish"},
+        custom_metrics={
+            "number": {"parityish": number_metric},
+            "integer": {"parityish": integer_metric},
+        },
+    )
+
+    assert fallback.align(1, 2).score == 0.6
+    assert override.align(1, 2).score == 0.9
+
+
+@pytest.mark.parametrize(
+    ("schema", "gold", "pred", "schema_type"),
+    [
+        ({"type": "string", "score": "semantic"}, "a", "a", "string"),
+        ({"type": "number", "score": "gaussian"}, 1, 1, "number"),
+    ],
+)
+def test_unknown_primitive_score_name_raises_clear_error(schema, gold, pred, schema_type):
+    aligner = ObjectAligner(schema)
+
+    with pytest.raises(ValueError, match=fr'Unsupported score ".*" for schema type "{schema_type}"'):
+        aligner.align(gold, pred)
+
+
+def test_invalid_custom_metric_return_value_outside_unit_interval_raises():
+    aligner = ObjectAligner(
+        {"type": "string", "score": "bad"},
+        custom_metrics={"string": {"bad": lambda gold, pred: 1.5}},
+    )
+
+    with pytest.raises(ValueError, match=r'must return a score in \[0, 1\]'):
+        aligner.align("a", "b")
+
+
+def test_invalid_custom_metric_return_value_type_raises():
+    aligner = ObjectAligner(
+        {"type": "number", "score": "bad"},
+        custom_metrics={"number": {"bad": lambda gold, pred: "nope"}},
+    )
+
+    with pytest.raises(TypeError, match=r'must return a real number in \[0, 1\]'):
+        aligner.align(1, 2)
 
 
 def test_boolean_true_is_treated_as_boolean_not_number():

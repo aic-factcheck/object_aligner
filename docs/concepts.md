@@ -74,7 +74,7 @@ aligner_with_reasoning = ObjectAligner(schema, generate_reasoning=True)
 It provides two primary methods:
 
 - **`align(gold, pred, skip_validation=False)`** — Returns the match object (`MatchItem`, `MatchList`, or `MatchDict`) representing the full alignment tree.
-- **`metric(gold, pred, debug=False, generate_reasoning=None)`** — Validates both objects against the schema, runs alignment, and returns `{"score": ...}` by default, or `{"score": ..., "reasoning": ...}` when reasoning is enabled.
+- **`metric(gold, pred, debug=False, generate_reasoning=None)`** — Validates both objects against the schema, runs alignment, and returns `{"score": ...}` by default. It adds `"reasoning"` when reasoning is enabled and adds a structured `"debug"` alignment tree when `debug=True`.
 
 ### Migration note
 

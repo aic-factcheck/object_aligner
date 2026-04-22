@@ -12,21 +12,30 @@ This is a complete reference of all schema keywords recognized by Object Aligner
 
 All standard JSON Schema validation keywords (e.g., `required`, `additionalProperties`, `minItems`, `maxItems`, `enum`, etc.) are also accepted and used during validation in `metric()`, but they do **not** affect alignment behavior.
 
+Custom primitive metrics are supplied through `ObjectAligner(..., custom_metrics=...)`, not as inline callables in the schema.
+
 ---
 
 ## String type (`"type": "string"`)
 
 | Keyword | Type | Default | Description |
 |---------|------|---------|-------------|
-| `score` ⚡ | string | `"jaro"` | Scoring function: `"jaro"` or `"exact"` |
-| `threshold` ⚡ | float | `0.0` | Scores below this value are set to 0.0 |
+| `score` ⚡ | string | `"jaro"` | Any built-in string metric name or a registered custom metric name |
+| `threshold` ⚡ | float | `0.0` | Scores below this value are set to `0.0` |
 
 ### Score functions
 
-| Value | Formula | Use when |
-|-------|---------|----------|
-| `"jaro"` | Jaro normalized similarity via `rapidfuzz` | Names, labels, short text — tolerant of typos |
+| Value | Formula / implementation | Use when |
+|-------|---------------------------|----------|
+| `"jaro"` | Jaro normalized similarity via `rapidfuzz` | Names, labels, short text with typos |
+| `"jaro_winkler"` | Jaro-Winkler normalized similarity | Like Jaro, but shared prefixes should count more |
+| `"levenshtein"` | Levenshtein normalized similarity | General-purpose edit-distance matching |
+| `"damerau_levenshtein"` | Damerau-Levenshtein normalized similarity | Adjacent transpositions should be treated naturally |
+| `"osa"` | Optimal string alignment normalized similarity | Another transposition-aware edit metric |
+| `"indel"` | Indel normalized similarity | Insert/delete-oriented matching |
+| `"lcsseq"` | Longest-common-subsequence normalized similarity | Sequence overlap matters more than exact edits |
 | `"exact"` | `1.0 if a == b else 0.0` | Enum values, IDs, categorical strings |
+| custom name | User-provided `(gold, pred) -> float` | Semantic similarity or domain-specific scoring |
 
 ---
 
@@ -34,15 +43,18 @@ All standard JSON Schema validation keywords (e.g., `required`, `additionalPrope
 
 | Keyword | Type | Default | Description |
 |---------|------|---------|-------------|
-| `score` ⚡ | string | `"invdiff"` | Scoring function: `"invdiff"` or `"exact"` |
-| `threshold` ⚡ | float | `0.0` | Scores below this value are set to 0.0 |
+| `score` ⚡ | string | `"invdiff"` | `"invdiff"`, `"exact"`, or a registered custom metric name |
+| `threshold` ⚡ | float | `0.0` | Scores below this value are set to `0.0` |
 
 ### Score functions
 
-| Value | Formula | Use when |
-|-------|---------|----------|
-| `"invdiff"` | `1 / (1 + |a - b|)` | Continuous values where closeness matters (ages, prices, scores) |
+| Value | Formula / implementation | Use when |
+|-------|---------------------------|----------|
+| `"invdiff"` | `1 / (1 + |a - b|)` | Continuous values where closeness matters |
 | `"exact"` | `1.0 if a == b else 0.0` | Categorical integers, identifiers |
+| custom name | User-provided `(gold, pred) -> float` | Domain-specific numeric scoring |
+
+For integer schemas, custom metric lookup checks the `integer` registry first and then falls back to the `number` registry.
 
 ---
 
@@ -76,7 +88,7 @@ When both are present:
 
 Uses dynamic programming (similar to DNA sequence alignment):
 - Find the optimal pairing that maximizes total similarity
-- Allows gaps (unmatched items scored as 0)
+- Allows gaps (unmatched items scored as `0`)
 - Preserves left-to-right ordering
 
 ### Reorder alignment details
@@ -84,7 +96,7 @@ Uses dynamic programming (similar to DNA sequence alignment):
 Uses the Hungarian algorithm (via `scipy.optimize.linear_sum_assignment`):
 - Build an `n × m` similarity matrix between all gold–pred pairs
 - Find the assignment that maximizes total similarity
-- Unmatched items are scored as 0
+- Unmatched items are scored as `0`
 
 ---
 
@@ -97,33 +109,3 @@ Uses the Hungarian algorithm (via `scipy.optimize.linear_sum_assignment`):
 | `keyThreshold` ⚡ | float | `0.0` | Minimum key similarity to form a pairing; pairs below this are treated as unaligned |
 | `keyImportance` ⚡ | float | `1.0` | Weight of key score in the final dict score |
 | `valueImportance` ⚡ | float | `1.0` | Weight of value score in the final dict score |
-
-### Property-level keywords (inside `properties`)
-
-Each property schema supports all the type-specific keywords above, plus:
-
-| Keyword | Type | Default | Description |
-|---------|------|---------|-------------|
-| `valueWeight` ⚡ | float | `1.0` | Relative weight of this property's value score. Higher = more important. Weights are normalized across all properties before averaging. |
-
-### Key alignment process
-
-1. Compute a similarity matrix between all gold keys and pred keys using `keyScore`
-2. Apply `keyThreshold` to zero out low-similarity pairings
-3. Run Hungarian algorithm to find the optimal key assignment
-4. For each paired (gold_key, pred_key), look up the property schema from `properties[gold_key]`
-5. Recursively align the values using that schema
-6. Compute weighted average of value scores
-7. Combine key score and value score using `keyImportance` / `valueImportance`
-
----
-
-## Quick reference: scoring defaults
-
-| Type | Default score | Fuzzy? |
-|------|--------------|--------|
-| `boolean` | exact | No |
-| `integer` / `number` | `invdiff` | Yes — close values score higher |
-| `string` | `jaro` | Yes — similar strings score higher |
-| `array` (keys/items) | depends on inner type | Recursive |
-| `object` (keys) | `jaro` | Yes — similar keys pair together |

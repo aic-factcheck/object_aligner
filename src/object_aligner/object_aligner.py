@@ -1,10 +1,11 @@
 from collections.abc import Mapping
 from dataclasses import dataclass, field
+from numbers import Real
 from typing import Any
 
 import numpy as np
 from jsonschema import ValidationError, validate
-from rapidfuzz.distance import Jaro
+from rapidfuzz.distance import DamerauLevenshtein, Indel, Jaro, JaroWinkler, LCSseq, Levenshtein, OSA
 from scipy.optimize import linear_sum_assignment
 
 
@@ -14,17 +15,26 @@ class MatchItem:
     gold: Any
     pred: Any
 
+    def __post_init__(self):
+        object.__setattr__(self, "score", float(self.score))
+
 
 @dataclass(frozen=True)
 class MatchList:
     score: float
     children: list = field(default_factory=list)
 
+    def __post_init__(self):
+        object.__setattr__(self, "score", float(self.score))
+
 
 @dataclass(frozen=True)
 class MatchDict:
     score: float
     children: dict = field(default_factory=dict)
+
+    def __post_init__(self):
+        object.__setattr__(self, "score", float(self.score))
 
 
 DEFAULT_REASONING_TEMPLATES = {
@@ -63,8 +73,61 @@ def similarity_string_jaro(a, b):
     return Jaro.normalized_similarity(a, b)
 
 
+def similarity_string_jaro_winkler(a, b):
+    return JaroWinkler.normalized_similarity(a, b)
+
+
+def similarity_string_levenshtein(a, b):
+    return Levenshtein.normalized_similarity(a, b)
+
+
+def similarity_string_damerau_levenshtein(a, b):
+    return DamerauLevenshtein.normalized_similarity(a, b)
+
+
+def similarity_string_osa(a, b):
+    return OSA.normalized_similarity(a, b)
+
+
+def similarity_string_indel(a, b):
+    return Indel.normalized_similarity(a, b)
+
+
+def similarity_string_lcsseq(a, b):
+    return LCSseq.normalized_similarity(a, b)
+
+
+BUILTIN_STRING_METRICS = {
+    "exact": similarity_exact,
+    "jaro": similarity_string_jaro,
+    "jaro_winkler": similarity_string_jaro_winkler,
+    "levenshtein": similarity_string_levenshtein,
+    "damerau_levenshtein": similarity_string_damerau_levenshtein,
+    "osa": similarity_string_osa,
+    "indel": similarity_string_indel,
+    "lcsseq": similarity_string_lcsseq,
+}
+BUILTIN_NUMBER_METRICS = {
+    "exact": similarity_exact,
+    "invdiff": similarity_num_inv_diff,
+}
+SUPPORTED_CUSTOM_METRIC_TYPES = frozenset({"string", "number", "integer"})
+
+
 def to_pct_str(v):
     return f"{100 * v:.0f}%"
+
+
+def to_python_value(value):
+    if isinstance(value, np.generic):
+        return value.item()
+    if isinstance(value, list):
+        return [to_python_value(item) for item in value]
+    if isinstance(value, tuple):
+        return tuple(to_python_value(item) for item in value)
+    if isinstance(value, dict):
+        return {to_python_value(key): to_python_value(item) for key, item in value.items()}
+    return value
 
 
 class _ReasoningRenderer:
@@ -166,11 +229,22 @@ class _ReasoningRenderer:
 
 
 class ObjectAligner:
-    def __init__(self, schema, *, generate_reasoning=False, reasoning_templates=None):
+    def __init__(self, schema, *, custom_metrics=None, generate_reasoning=False, reasoning_templates=None):
+        """Create an object aligner.
+
+        custom_metrics maps schema types ("string", "number", "integer") to
+        mappings of metric name -> callable. Each callable must accept
+        ``(gold, pred)`` and return a real-valued score in ``[0, 1]``. Integer
+        schemas use built-in number metrics and fall back to custom ``number``
+        metrics unless overridden by a custom ``integer`` metric with the same
+        name.
+        """
+
         self.schema = schema
         self.generate_reasoning_default = generate_reasoning
         self.reasoning_templates = self._merge_reasoning_templates(reasoning_templates)
         self._reasoning_renderer = _ReasoningRenderer(self.reasoning_templates)
+        self._primitive_metrics = self._build_primitive_metric_registry(custom_metrics)
 
     def _merge_reasoning_templates(self, reasoning_templates):
         if reasoning_templates is None:
@@ -187,6 +261,86 @@ class ObjectAligner:
         templates.update(overrides)
         return templates
 
+    def _build_primitive_metric_registry(self, custom_metrics):
+        if custom_metrics is None:
+            custom_metrics = {}
+        if not isinstance(custom_metrics, Mapping):
+            raise TypeError("custom_metrics must be a mapping of schema types to metric-name mappings")
+
+        unsupported_types = sorted(set(custom_metrics) - SUPPORTED_CUSTOM_METRIC_TYPES)
+        if unsupported_types:
+            raise ValueError(f"Unsupported custom metric types: {unsupported_types}")
+
+        custom_by_type = {schema_type: {} for schema_type in SUPPORTED_CUSTOM_METRIC_TYPES}
+        builtin_by_type = {
+            "string": BUILTIN_STRING_METRICS,
+            "number": BUILTIN_NUMBER_METRICS,
+            "integer": BUILTIN_NUMBER_METRICS,
+        }
+
+        for schema_type, metrics in custom_metrics.items():
+            if not isinstance(metrics, Mapping):
+                raise TypeError(
+                    f'custom_metrics["{schema_type}"] must be a mapping of metric names to callables'
+                )
+
+            duplicate_names = sorted(set(metrics) & set(builtin_by_type[schema_type]))
+            if duplicate_names:
+                raise ValueError(
+                    f'custom_metrics["{schema_type}"] contains names that collide with built-in metrics: {duplicate_names}'
+                )
+
+            for metric_name, metric in metrics.items():
+                if not isinstance(metric_name, str):
+                    raise TypeError(
+                        f'custom_metrics["{schema_type}"] metric names must be strings, got {type(metric_name)!r}'
+                    )
+                if not callable(metric):
+                    raise TypeError(
+                        f'custom_metrics["{schema_type}"]["{metric_name}"] must be callable'
+                    )
+                custom_by_type[schema_type][metric_name] = metric
+
+        return {
+            "string": {**BUILTIN_STRING_METRICS, **custom_by_type["string"]},
+            "number": {**BUILTIN_NUMBER_METRICS, **custom_by_type["number"]},
+            "integer": {
+                **BUILTIN_NUMBER_METRICS,
+                **custom_by_type["number"],
+                **custom_by_type["integer"],
+            },
+        }
+
+    def _resolve_primitive_metric(self, schema_type, metric_name):
+        metrics = self._primitive_metrics[schema_type]
+        if metric_name not in metrics:
+            raise ValueError(
+                f'Unsupported score "{metric_name}" for schema type "{schema_type}". '
+                f'Supported scores: {sorted(metrics)}'
+            )
+        return metrics[metric_name]
+
+    def _validate_metric_score(self, schema_type, metric_name, score):
+        if isinstance(score, bool) or not isinstance(score, Real):
+            raise TypeError(
+                f'Metric "{metric_name}" for schema type "{schema_type}" must return a real number in [0, 1], got {score!r}'
+            )
+
+        score = float(score)
+        if not 0.0 <= score <= 1.0:
+            raise ValueError(
+                f'Metric "{metric_name}" for schema type "{schema_type}" must return a score in [0, 1], got {score!r}'
+            )
+        return score
+
+    def _align_primitive(self, g, p, schema, *, schema_type, default_score):
+        score_type = schema.get("score", default_score)
+        threshold = schema.get("threshold", 0.0)
+        scoref = self._resolve_primitive_metric(schema_type, score_type)
+        score = self._validate_metric_score(schema_type, score_type, scoref(g, p))
+        score = 0.0 if score < threshold else score
+        return {"gold": g, "pred": p, "match": MatchItem(score=score, gold=g, pred=p)}
+
     def _list_norm(self, aligned_gold, aligned_pred, schema):
         ignore_excess = schema.get("ignoreExcess", False)
         ignore_missing = schema.get("ignoreMissing", False)
@@ -200,30 +354,10 @@ class ObjectAligner:
         return D
 
     def _align_numbers(self, g, p, schema):
-        score_type = schema.get("score", "invdiff")
-        threshold = schema.get("threshold", 0.0)
-
-        assert score_type in ["exact", "invdiff"]
-        if score_type == "exact":
-            score = similarity_exact(g, p)
-        else:
-            score = similarity_num_inv_diff(g, p)
-
-        score = 0.0 if score < threshold else score
-        assert 0 <= score <= 1, score
-        return {"gold": g, "pred": p, "match": MatchItem(score=score, gold=g, pred=p)}
+        return self._align_primitive(g, p, schema, schema_type=schema["type"], default_score="invdiff")
 
     def _align_strings(self, g, p, schema):
-        score_type = schema.get("score", "jaro")
-        threshold = schema.get("threshold", 0.0)
-        assert score_type in ["exact", "jaro"]
-        if score_type == "exact":
-            score = similarity_exact(g, p)
-        else:
-            score = similarity_string_jaro(g, p)
-        score = 0.0 if score < threshold else score
-        assert 0 <= score <= 1, score
-        return {"gold": g, "pred": p, "match": MatchItem(score=score, gold=g, pred=p)}
+        return self._align_primitive(g, p, schema, schema_type="string", default_score="jaro")
 
     def _align_lists_reorder(self, gold, pred, schema):
         n, m = len(gold), len(pred)
@@ -532,6 +666,37 @@ class ObjectAligner:
         assert 0 <= aligned["match"].score <= 1, aligned
         return aligned
 
+    def _serialize_match_debug(self, aligned):
+        if isinstance(aligned, MatchItem):
+            return {
+                "kind": "item",
+                "score": float(aligned.score),
+                "gold": to_python_value(aligned.gold),
+                "pred": to_python_value(aligned.pred),
+            }
+
+        if isinstance(aligned, MatchList):
+            return {
+                "kind": "list",
+                "score": float(aligned.score),
+                "children": [self._serialize_match_debug(child) for child in aligned.children],
+            }
+
+        if isinstance(aligned, MatchDict):
+            return {
+                "kind": "dict",
+                "score": float(aligned.score),
+                "children": [
+                    {
+                        "key": self._serialize_match_debug(key),
+                        "value": self._serialize_match_debug(child),
+                    }
+                    for key, child in aligned.children.items()
+                ],
+            }
+
+        raise TypeError(f"Unknown match instance: {aligned!r}")
+
     def align(self, g, p, skip_validation=False):
         assert type(g) == type(p), f"The schemas must be the same, got different types: {type(g)} and {type(p)}"
         if not skip_validation:
@@ -540,7 +705,6 @@ class ObjectAligner:
         return self._align_helper(g, p, self.schema)["match"]
 
     def metric(self, gold, pred, debug=False, generate_reasoning=None):
-        del debug
         validate(instance=gold, schema=self.schema)
 
         should_generate_reasoning = self.generate_reasoning_default if generate_reasoning is None else generate_reasoning
@@ -553,7 +717,9 @@ class ObjectAligner:
             return {"score": 0.0}
 
         aligned = self.align(gold, pred, skip_validation=True)
-        result = {"score": aligned.score}
+        result = {"score": float(aligned.score)}
         if should_generate_reasoning:
             result["reasoning"] = self._reasoning_renderer.render(aligned)
+        if debug:
+            result["debug"] = self._serialize_match_debug(aligned)
         return result
