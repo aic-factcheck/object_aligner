@@ -18,7 +18,7 @@ def test_list_of_dicts_students_example():
         },
         "order": "align",
     }
-    aligner = ObjectAligner("students", schema)
+    aligner = ObjectAligner(schema)
 
     gold = [{"name": "Alice", "score": 95}, {"name": "Bob", "score": 82}]
     pred = [{"name": "Alice", "score": 93}, {"name": "Bobby", "score": 82}]
@@ -47,7 +47,7 @@ def test_dict_of_lists_scores_each_property_independently():
         "keyImportance": 0.0,
         "valueImportance": 1.0,
     }
-    aligner = ObjectAligner("dict-of-lists", schema)
+    aligner = ObjectAligner(schema)
 
     score = aligner.metric(
         {"tags": ["a", "b"], "numbers": [1, 2]},
@@ -90,7 +90,7 @@ def test_mixed_depth_structure_drops_only_at_deep_leaf():
         "keyImportance": 0.0,
         "valueImportance": 1.0,
     }
-    aligner = ObjectAligner("deep", schema)
+    aligner = ObjectAligner(schema)
 
     gold = {"level1": [{"level2": [{"leaf": "x"}, {"leaf": "y"}]}]}
     pred_same = {"level1": [{"level2": [{"leaf": "x"}, {"leaf": "y"}]}]}
@@ -116,7 +116,7 @@ def test_prefix_items_inside_nested_reordered_list():
             "restImportance": 1.0,
         },
     }
-    aligner = ObjectAligner("nested-prefix", schema)
+    aligner = ObjectAligner(schema)
 
     gold = [["bus", 3, "ship"], ["car", 5, "airplane"]]
     pred = [["car", 5, "plane"], ["bus", 3]]
@@ -151,7 +151,7 @@ def test_completely_off_nested_structure_scores_zero_with_exact_matching():
         "keyImportance": 0.0,
         "valueImportance": 1.0,
     }
-    aligner = ObjectAligner("nested-zero", schema)
+    aligner = ObjectAligner(schema)
 
     gold = {"items": [{"labels": ["x", "y"]}]}
     pred = {"items": [{"labels": ["a", "b"]}]}

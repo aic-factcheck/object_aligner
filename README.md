@@ -1,6 +1,6 @@
 # object-aligner
 
-Python library for aligning structured objects (`dict`, `list`, primitives) and scoring similarity in `[0, 1]` with human-readable reasoning.
+Python library for aligning structured objects (`dict`, `list`, primitives) and scoring similarity in `[0, 1]`, with optional human-readable reasoning.
 
 ## Install
 
@@ -20,12 +20,25 @@ pip install object-aligner
 from object_aligner import ObjectAligner
 
 schema = {"type": "string", "score": "jaro"}
-aligner = ObjectAligner("demo", schema)
+aligner = ObjectAligner(schema)
 
 result = aligner.metric("hello", "hallo")
-print(result["score"])
-print(result["reasoning"])
+print(result)  # {"score": ...}
+
+result_with_reasoning = aligner.metric("hello", "hallo", generate_reasoning=True)
+print(result_with_reasoning["score"])
+print(result_with_reasoning["reasoning"])
 ```
+
+## API note
+
+`ObjectAligner` now takes only the schema:
+
+```python
+aligner = ObjectAligner(schema)
+```
+
+The older `ObjectAligner("name", schema)` form and `get_name()` are no longer supported.
 
 ## Development
 

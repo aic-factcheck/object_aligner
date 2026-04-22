@@ -1,6 +1,6 @@
 # Object Aligner Documentation
 
-**Object Aligner** is a Python library for computing similarity scores between structured data objects. It aligns a "gold" (reference) object with a "predicted" object and produces a fine-grained similarity score in the range [0, 1], along with a human-readable explanation of the differences.
+**Object Aligner** is a Python library for computing similarity scores between structured data objects. It aligns a "gold" (reference) object with a "predicted" object and produces a fine-grained similarity score in the range [0, 1], with optional human-readable reasoning about the differences.
 
 ## Why Object Aligner?
 
@@ -9,7 +9,7 @@ When evaluating structured outputs — JSON objects, lists of extracted entities
 - **Recursively** aligning objects of any nesting depth
 - Supporting **fuzzy matching** for strings (Jaro similarity) and numbers (inverse difference)
 - Using the **Hungarian algorithm** to find optimal alignments for unordered lists and dictionary keys
-- Producing **interpretable reasoning** that explains every mismatch
+- Producing **interpretable reasoning** when you ask for it
 
 ## Quick Start
 
@@ -17,12 +17,24 @@ When evaluating structured outputs — JSON objects, lists of extracted entities
 from object_aligner import ObjectAligner
 
 schema = {"type": "string"}
-aligner = ObjectAligner("my-metric", schema)
+aligner = ObjectAligner(schema)
 
 result = aligner.metric(gold="hello", pred="hallo")
-print(result["score"])      # 0.8667
-print(result["reasoning"])  # The predicted value "hallo" does not match the gold "hello" (score=87%).
+print(result["score"])  # 0.8667
+
+result = aligner.metric(gold="hello", pred="hallo", generate_reasoning=True)
+print(result["reasoning"])
 ```
+
+## Migration note
+
+The constructor now takes only the schema:
+
+```python
+aligner = ObjectAligner(schema)
+```
+
+The older `ObjectAligner("name", schema)` form and `get_name()` have been removed.
 
 ## Tutorial Chapters
 
@@ -33,7 +45,7 @@ print(result["reasoning"])  # The predicted value "hallo" does not match the gol
 | 3 | [Lists & Arrays](lists.md) | Fixed order, reordering, prefix items, and combinations |
 | 4 | [Dictionaries & Objects](dicts.md) | Key matching, value matching, importance weights |
 | 5 | [Nesting & Complex Structures](nesting.md) | Deeply nested data, real-world composite examples |
-| 6 | [The Metric Function](metric.md) | End-to-end evaluation with validation and reasoning |
+| 6 | [The Metric Function](metric.md) | End-to-end evaluation with validation and optional reasoning |
 | 7 | [Schema Reference](schema_reference.md) | Complete reference of all schema keywords |
 
 ## Installation

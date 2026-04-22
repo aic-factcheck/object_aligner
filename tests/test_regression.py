@@ -4,20 +4,16 @@ from object_aligner import ObjectAligner
 
 
 def test_primitives_documented_examples():
-    assert ObjectAligner("bool", {"type": "boolean"}).metric(True, False)["score"] == 0.0
-    assert ObjectAligner("num", {"type": "integer", "score": "invdiff", "threshold": 0.5}).metric(50, 51)["score"] == 0.5
-    assert ObjectAligner("num", {"type": "integer", "score": "invdiff", "threshold": 0.5}).metric(50, 52)["score"] == 0.0
-    assert ObjectAligner("str", {"type": "string", "score": "jaro"}).metric("hello", "hallo")["score"] > 0.8
+    assert ObjectAligner({"type": "boolean"}).metric(True, False)["score"] == 0.0
+    assert ObjectAligner({"type": "integer", "score": "invdiff", "threshold": 0.5}).metric(50, 51)["score"] == 0.5
+    assert ObjectAligner({"type": "integer", "score": "invdiff", "threshold": 0.5}).metric(50, 52)["score"] == 0.0
+    assert ObjectAligner({"type": "string", "score": "jaro"}).metric("hello", "hallo")["score"] > 0.8
 
 
 def test_lists_documented_examples():
-    quiz = ObjectAligner(
-        "quiz",
-        {"type": "array", "items": {"type": "integer", "score": "exact"}, "order": "fixed"},
+    quiz = ObjectAligner({"type": "array", "items": {"type": "integer", "score": "exact"}, "order": "fixed"},
     )
-    skills = ObjectAligner(
-        "skills",
-        {"type": "array", "items": {"type": "string", "score": "jaro", "threshold": 0.5}, "order": "align"},
+    skills = ObjectAligner({"type": "array", "items": {"type": "string", "score": "jaro", "threshold": 0.5}, "order": "align"},
     )
 
     assert quiz.metric([42, 7, 13], [99, 7, 13])["score"] == pytest.approx(0.5)
@@ -26,9 +22,7 @@ def test_lists_documented_examples():
 
 
 def test_dicts_documented_examples():
-    exact = ObjectAligner(
-        "person-exact-keys",
-        {
+    exact = ObjectAligner({
             "type": "object",
             "properties": {
                 "name": {"type": "string"},
@@ -37,9 +31,7 @@ def test_dicts_documented_examples():
             "keyScore": "exact",
         },
     )
-    fuzzy = ObjectAligner(
-        "person-fuzzy-keys",
-        {
+    fuzzy = ObjectAligner({
             "type": "object",
             "properties": {
                 "weight": {"type": "integer", "valueWeight": 1.0},
@@ -58,9 +50,7 @@ def test_dicts_documented_examples():
 
 
 def test_nesting_documented_examples():
-    students = ObjectAligner(
-        "students",
-        {
+    students = ObjectAligner({
             "type": "array",
             "items": {
                 "type": "object",
@@ -75,9 +65,7 @@ def test_nesting_documented_examples():
             "order": "align",
         },
     )
-    product = ObjectAligner(
-        "product",
-        {
+    product = ObjectAligner({
             "type": "object",
             "properties": {
                 "product": {"type": "string", "score": "jaro", "threshold": 0.5, "valueWeight": 2.0},
@@ -107,9 +95,7 @@ def test_nesting_documented_examples():
             "valueImportance": 1.0,
         },
     )
-    orders = ObjectAligner(
-        "orders",
-        {
+    orders = ObjectAligner({
             "type": "array",
             "items": {
                 "type": "array",
@@ -122,9 +108,7 @@ def test_nesting_documented_examples():
             "order": "fixed",
         },
     )
-    exam = ObjectAligner(
-        "exam-results",
-        {
+    exam = ObjectAligner({
             "type": "array",
             "items": {
                 "type": "object",
@@ -221,16 +205,12 @@ def test_nesting_documented_examples():
 
 
 def test_adversarial_and_boundary_regressions():
-    reorder = ObjectAligner(
-        "large-reorder",
-        {"type": "array", "items": {"type": "string", "score": "exact"}, "order": "align"},
+    reorder = ObjectAligner({"type": "array", "items": {"type": "string", "score": "exact"}, "order": "align"},
     )
-    fixed = ObjectAligner(
-        "large-fixed",
-        {"type": "array", "items": {"type": "string", "score": "exact"}, "order": "fixed"},
+    fixed = ObjectAligner({"type": "array", "items": {"type": "string", "score": "exact"}, "order": "fixed"},
     )
-    numeric = ObjectAligner("numeric", {"type": "number", "score": "invdiff"})
-    threshold = ObjectAligner("threshold", {"type": "string", "score": "jaro", "threshold": 0.7777777777777777})
+    numeric = ObjectAligner({"type": "number", "score": "invdiff"})
+    threshold = ObjectAligner({"type": "string", "score": "jaro", "threshold": 0.7777777777777777})
 
     values = [f"v{i}" for i in range(100)]
     assert reorder.metric(values, list(reversed(values)))["score"] == 1.0
@@ -239,5 +219,5 @@ def test_adversarial_and_boundary_regressions():
     assert numeric.metric(0, 1_000_000)["score"] < 1e-5
     assert numeric.metric(1.0, 1.001)["score"] > 0.999
 
-    bool_aligner = ObjectAligner("bool", {"type": "boolean"})
+    bool_aligner = ObjectAligner({"type": "boolean"})
     assert bool_aligner.metric(True, False)["score"] == 0.0

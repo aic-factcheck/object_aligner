@@ -5,9 +5,7 @@ from object_aligner.object_aligner import MatchDict, MatchItem
 
 
 def test_exact_key_matching_basic_cases():
-    aligner = ObjectAligner(
-        "dict-exact",
-        {
+    aligner = ObjectAligner({
             "type": "object",
             "properties": {
                 "a": {"type": "integer", "score": "exact"},
@@ -24,9 +22,7 @@ def test_exact_key_matching_basic_cases():
 
 
 def test_fuzzy_key_matching_handles_typos_and_documented_example():
-    fuzzy = ObjectAligner(
-        "dict-fuzzy",
-        {
+    fuzzy = ObjectAligner({
             "type": "object",
             "properties": {
                 "colour": {"type": "string", "score": "exact"},
@@ -35,9 +31,7 @@ def test_fuzzy_key_matching_handles_typos_and_documented_example():
             "keyThreshold": 0.5,
         },
     )
-    doc = ObjectAligner(
-        "dict-doc",
-        {
+    doc = ObjectAligner({
             "type": "object",
             "properties": {
                 "weight": {"type": "integer", "valueWeight": 1.0},
@@ -63,18 +57,14 @@ def test_fuzzy_key_matching_handles_typos_and_documented_example():
 
 
 def test_key_threshold_can_prevent_or_allow_fuzzy_matches():
-    high = ObjectAligner(
-        "threshold-high",
-        {
+    high = ObjectAligner({
             "type": "object",
             "properties": {"colour": {"type": "string", "score": "exact"}},
             "keyScore": "jaro",
             "keyThreshold": 0.7,
         },
     )
-    low = ObjectAligner(
-        "threshold-low",
-        {
+    low = ObjectAligner({
             "type": "object",
             "properties": {"colour": {"type": "string", "score": "exact"}},
             "keyScore": "jaro",
@@ -101,10 +91,10 @@ def test_key_and_value_importance_follow_documented_formula():
     gold = {"id": 1, "name": "Alice"}
     pred = {"id": 2, "name": "Alice"}
 
-    values_only = ObjectAligner("values-only", {**base_schema, "keyImportance": 0.0, "valueImportance": 1.0})
-    keys_only = ObjectAligner("keys-only", {**base_schema, "keyImportance": 1.0, "valueImportance": 0.0})
-    balanced = ObjectAligner("balanced", {**base_schema, "keyImportance": 1.0, "valueImportance": 1.0})
-    unbalanced = ObjectAligner("unbalanced", {**base_schema, "keyImportance": 1.0, "valueImportance": 3.0})
+    values_only = ObjectAligner({**base_schema, "keyImportance": 0.0, "valueImportance": 1.0})
+    keys_only = ObjectAligner({**base_schema, "keyImportance": 1.0, "valueImportance": 0.0})
+    balanced = ObjectAligner({**base_schema, "keyImportance": 1.0, "valueImportance": 1.0})
+    unbalanced = ObjectAligner({**base_schema, "keyImportance": 1.0, "valueImportance": 3.0})
 
     assert values_only.align(gold, pred).score == pytest.approx(0.25)
     assert keys_only.align(gold, pred).score == pytest.approx(1.0)
@@ -113,9 +103,7 @@ def test_key_and_value_importance_follow_documented_formula():
 
 
 def test_value_weights_affect_value_score():
-    aligner = ObjectAligner(
-        "weighted-values",
-        {
+    aligner = ObjectAligner({
             "type": "object",
             "properties": {
                 "id": {"type": "integer", "score": "exact", "valueWeight": 3.0},
@@ -131,9 +119,7 @@ def test_value_weights_affect_value_score():
 
 
 def test_missing_and_extra_keys_produce_zero_scored_value_matches():
-    aligner = ObjectAligner(
-        "missing-extra",
-        {
+    aligner = ObjectAligner({
             "type": "object",
             "properties": {
                 "a": {"type": "integer", "score": "exact"},
@@ -178,6 +164,6 @@ def test_type_mismatch_raises_value_error_when_keys_align(gold, pred):
             "keyScore": "exact",
         }
 
-    aligner = ObjectAligner("type-mismatch", schema)
+    aligner = ObjectAligner(schema)
     with pytest.raises(ValueError):
         aligner.align(gold, pred, skip_validation=True)

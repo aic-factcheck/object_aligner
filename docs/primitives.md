@@ -10,7 +10,7 @@ Boolean comparison is always **exact** — there's no notion of "fuzzy" for bool
 from object_aligner import ObjectAligner
 
 schema = {"type": "boolean"}
-aligner = ObjectAligner("bool-test", schema)
+aligner = ObjectAligner(schema)
 
 # Perfect match
 result = aligner.align(True, True)
@@ -41,7 +41,7 @@ Returns 1.0 if the values are equal, 0.0 otherwise. Best for categorical or iden
 
 ```python
 schema = {"type": "integer", "score": "exact"}
-aligner = ObjectAligner("num-exact", schema)
+aligner = ObjectAligner(schema)
 
 print(aligner.align(42, 42))   # MatchItem(score=1.0, gold=42, pred=42)
 print(aligner.align(42, 43))   # MatchItem(score=0.0, gold=42, pred=43)
@@ -53,7 +53,7 @@ Returns `1 / (1 + |a - b|)`. This gives a smooth penalty for numeric differences
 
 ```python
 schema = {"type": "integer", "score": "invdiff"}
-aligner = ObjectAligner("num-invdiff", schema)
+aligner = ObjectAligner(schema)
 
 print(aligner.align(50, 51))   # score ≈ 0.5  (1 / (1 + 1))
 print(aligner.align(50, 52))   # score ≈ 0.33 (1 / (1 + 2))
@@ -69,7 +69,7 @@ You can set a `threshold` (default 0.0) to zero out scores below it. This acts a
 
 ```python
 schema = {"type": "integer", "score": "invdiff", "threshold": 0.5}
-aligner = ObjectAligner("num-thresh", schema)
+aligner = ObjectAligner(schema)
 
 # |50 - 51| = 1 → 1/(1+1) = 0.5, which is not < 0.5, so it passes
 print(aligner.align(50, 51))  # MatchItem(score=0.5, gold=50, pred=51)
@@ -98,7 +98,7 @@ Uses the [Jaro similarity](https://en.wikipedia.org/wiki/Jaro%E2%80%93Winkler_di
 
 ```python
 schema = {"type": "string", "score": "jaro"}
-aligner = ObjectAligner("str-jaro", schema)
+aligner = ObjectAligner(schema)
 
 print(aligner.align("hello", "hallo"))    # score ≈ 0.87
 print(aligner.align("Katherine", "Catherine"))  # score ≈ 0.92
@@ -111,7 +111,7 @@ Returns 1.0 if the strings are identical, 0.0 otherwise. Use when you need stric
 
 ```python
 schema = {"type": "string", "score": "exact"}
-aligner = ObjectAligner("str-exact", schema)
+aligner = ObjectAligner(schema)
 
 print(aligner.align("hello", "hello"))  # MatchItem(score=1.0, ...)
 print(aligner.align("hello", "Hello"))  # MatchItem(score=0.0, ...)
@@ -125,7 +125,7 @@ Same as for numbers — scores below the threshold are set to 0.0:
 
 ```python
 schema = {"type": "string", "score": "jaro", "threshold": 0.7}
-aligner = ObjectAligner("str-thresh", schema)
+aligner = ObjectAligner(schema)
 
 # "cat" vs "car" has Jaro similarity ≈ 0.78 → above threshold
 print(aligner.align("cat", "car"))   # score ≈ 0.78
@@ -138,7 +138,7 @@ print(aligner.align("cat", "dog"))   # score = 0.0
 
 ```python
 schema = {"type": "string", "score": "jaro", "threshold": 0.5}
-aligner = ObjectAligner("name-match", schema)
+aligner = ObjectAligner(schema)
 
 # Common name variations
 print(aligner.align("Elizabeth", "Elisabeth"))  # score ≈ 0.97

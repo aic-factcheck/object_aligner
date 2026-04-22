@@ -18,7 +18,7 @@ REORDER_STR_EXACT = {
 
 
 def test_fixed_order_basic_cases():
-    aligner = ObjectAligner("fixed", FIXED_INT_EXACT)
+    aligner = ObjectAligner(FIXED_INT_EXACT)
 
     assert aligner.align([1, 2, 3], [1, 2, 3]).score == 1.0
     assert aligner.align([1, 2, 3], [1, 3, 2]).score == pytest.approx(0.5)
@@ -29,7 +29,7 @@ def test_fixed_order_basic_cases():
 
 
 def test_fixed_order_gap_behavior_matches_current_dp_alignment():
-    aligner = ObjectAligner("fixed", FIXED_INT_EXACT)
+    aligner = ObjectAligner(FIXED_INT_EXACT)
     match = aligner.align([1, 2, 4], [2, 3])
 
     assert isinstance(match, MatchList)
@@ -43,17 +43,13 @@ def test_fixed_order_gap_behavior_matches_current_dp_alignment():
 
 
 def test_fixed_order_with_string_and_number_scoring():
-    string_aligner = ObjectAligner(
-        "fixed-jaro",
-        {
+    string_aligner = ObjectAligner({
             "type": "array",
             "items": {"type": "string", "score": "jaro"},
             "order": "fixed",
         },
     )
-    number_aligner = ObjectAligner(
-        "fixed-invdiff",
-        {
+    number_aligner = ObjectAligner({
             "type": "array",
             "items": {"type": "number", "score": "invdiff"},
             "order": "fixed",
@@ -65,9 +61,7 @@ def test_fixed_order_with_string_and_number_scoring():
 
 
 def test_reorder_alignment_basic_cases():
-    aligner = ObjectAligner(
-        "reorder",
-        {
+    aligner = ObjectAligner({
             "type": "array",
             "items": {"type": "string", "score": "jaro", "threshold": 0.5},
             "order": "align",
@@ -80,7 +74,7 @@ def test_reorder_alignment_basic_cases():
 
 
 def test_reorder_alignment_size_cases_and_mismatch_structure():
-    aligner = ObjectAligner("reorder", REORDER_STR_EXACT)
+    aligner = ObjectAligner(REORDER_STR_EXACT)
 
     assert aligner.align([], []).score == 1.0
     assert aligner.align([], ["a"]).score == 0.0
@@ -96,9 +90,7 @@ def test_reorder_alignment_size_cases_and_mismatch_structure():
 
 
 def test_reorder_threshold_turns_low_similarity_pairs_into_unaligned_items():
-    aligner = ObjectAligner(
-        "reorder-threshold",
-        {
+    aligner = ObjectAligner({
             "type": "array",
             "items": {"type": "string", "score": "jaro", "threshold": 0.9},
             "order": "align",
@@ -114,9 +106,7 @@ def test_reorder_threshold_turns_low_similarity_pairs_into_unaligned_items():
 
 
 def test_prefix_items_support_weighted_prefix_scoring():
-    aligner = ObjectAligner(
-        "prefix-only",
-        {
+    aligner = ObjectAligner({
             "type": "array",
             "prefixItems": [
                 {"type": "integer", "score": "exact"},
@@ -131,9 +121,7 @@ def test_prefix_items_support_weighted_prefix_scoring():
 
 
 def test_prefix_and_items_combined_use_importance_weighting():
-    aligner = ObjectAligner(
-        "prefix-combined",
-        {
+    aligner = ObjectAligner({
             "type": "array",
             "prefixItems": [
                 {"type": "integer", "score": "exact"},
@@ -151,27 +139,21 @@ def test_prefix_and_items_combined_use_importance_weighting():
 
 
 def test_ignore_excess_and_ignore_missing_change_list_normalization():
-    ignore_excess = ObjectAligner(
-        "ignore-excess",
-        {
+    ignore_excess = ObjectAligner({
             "type": "array",
             "items": {"type": "string", "score": "exact"},
             "order": "align",
             "ignoreExcess": True,
         },
     )
-    ignore_missing = ObjectAligner(
-        "ignore-missing",
-        {
+    ignore_missing = ObjectAligner({
             "type": "array",
             "items": {"type": "string", "score": "exact"},
             "order": "align",
             "ignoreMissing": True,
         },
     )
-    ignore_both = ObjectAligner(
-        "ignore-both",
-        {
+    ignore_both = ObjectAligner({
             "type": "array",
             "items": {"type": "string", "score": "exact"},
             "order": "align",
@@ -186,9 +168,7 @@ def test_ignore_excess_and_ignore_missing_change_list_normalization():
 
 
 def test_ignore_excess_and_ignore_missing_with_total_mismatch_is_known_issue():
-    aligner = ObjectAligner(
-        "ignore-both-total-mismatch",
-        {
+    aligner = ObjectAligner({
             "type": "array",
             "items": {"type": "string", "score": "exact"},
             "order": "align",

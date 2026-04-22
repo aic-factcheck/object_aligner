@@ -14,7 +14,7 @@ from object_aligner.object_aligner import MatchItem, similarity_string_jaro
     ],
 )
 def test_boolean_alignment_is_exact(gold, pred, expected):
-    aligner = ObjectAligner("bool-test", {"type": "boolean", "score": "ignored", "threshold": 0.99})
+    aligner = ObjectAligner({"type": "boolean", "score": "ignored", "threshold": 0.99})
     match = aligner.align(gold, pred)
 
     assert isinstance(match, MatchItem)
@@ -31,7 +31,7 @@ def test_boolean_alignment_is_exact(gold, pred, expected):
     ],
 )
 def test_number_exact_mode(gold, pred, expected):
-    aligner = ObjectAligner("num-exact", {"type": "number", "score": "exact"})
+    aligner = ObjectAligner({"type": "number", "score": "exact"})
     assert aligner.align(gold, pred).score == expected
 
 
@@ -47,13 +47,13 @@ def test_number_exact_mode(gold, pred, expected):
     ],
 )
 def test_number_invdiff_mode(gold, pred, expected):
-    aligner = ObjectAligner("num-invdiff", {"type": "number", "score": "invdiff"})
+    aligner = ObjectAligner({"type": "number", "score": "invdiff"})
     assert aligner.align(gold, pred).score == pytest.approx(expected)
 
 
 def test_number_threshold_applies_after_scoring():
-    invdiff = ObjectAligner("num-threshold", {"type": "integer", "score": "invdiff", "threshold": 0.5})
-    exact = ObjectAligner("num-threshold-exact", {"type": "integer", "score": "exact", "threshold": 0.5})
+    invdiff = ObjectAligner({"type": "integer", "score": "invdiff", "threshold": 0.5})
+    exact = ObjectAligner({"type": "integer", "score": "exact", "threshold": 0.5})
 
     assert invdiff.align(50, 51).score == 0.5
     assert invdiff.align(50, 52).score == 0.0
@@ -71,12 +71,12 @@ def test_number_threshold_applies_after_scoring():
     ],
 )
 def test_string_exact_mode(gold, pred, expected):
-    aligner = ObjectAligner("str-exact", {"type": "string", "score": "exact"})
+    aligner = ObjectAligner({"type": "string", "score": "exact"})
     assert aligner.align(gold, pred).score == expected
 
 
 def test_string_jaro_mode_covers_classic_cases():
-    aligner = ObjectAligner("str-jaro", {"type": "string", "score": "jaro"})
+    aligner = ObjectAligner({"type": "string", "score": "jaro"})
 
     assert aligner.align("hello", "hello").score == 1.0
     assert aligner.align("hello", "hallo").score > 0.8
@@ -88,7 +88,7 @@ def test_string_jaro_mode_covers_classic_cases():
 
 
 def test_string_threshold_zeroes_out_below_cutoff_and_keeps_boundary():
-    aligner = ObjectAligner("str-threshold", {"type": "string", "score": "jaro", "threshold": 0.7})
+    aligner = ObjectAligner({"type": "string", "score": "jaro", "threshold": 0.7})
     boundary = similarity_string_jaro("cat", "car")
 
     assert boundary > 0.7
@@ -97,7 +97,7 @@ def test_string_threshold_zeroes_out_below_cutoff_and_keeps_boundary():
 
 
 def test_boolean_true_is_treated_as_boolean_not_number():
-    aligner = ObjectAligner("bool", {"type": "boolean"})
+    aligner = ObjectAligner({"type": "boolean"})
     match = aligner.align(True, True)
 
     assert isinstance(match, MatchItem)

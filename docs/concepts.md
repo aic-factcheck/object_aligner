@@ -2,7 +2,7 @@
 
 ## The Big Picture
 
-Object Aligner compares two structured objects — a **gold** (ground truth) and a **pred** (prediction) — and returns a similarity score between 0 and 1, plus a detailed explanation of how they differ.
+Object Aligner compares two structured objects — a **gold** (ground truth) and a **pred** (prediction) — and returns a similarity score between 0 and 1, plus optional explanation of how they differ.
 
 The comparison is governed by a **schema** that tells the aligner:
 
@@ -60,18 +60,25 @@ dct = MatchDict(score=0.8, children={
 
 ### ObjectAligner Class
 
-The main entry point. You create it with an identifier and a schema:
+The main entry point. You create it with a schema and optional reasoning configuration:
 
 ```python
 from object_aligner import ObjectAligner
 
-aligner = ObjectAligner("my-evaluator", schema)
+aligner = ObjectAligner(schema)
+aligner_with_reasoning = ObjectAligner(schema, generate_reasoning=True)
 ```
+
+`reasoning_templates` lets you override selected built-in reasoning strings.
 
 It provides two primary methods:
 
 - **`align(gold, pred, skip_validation=False)`** — Returns the match object (`MatchItem`, `MatchList`, or `MatchDict`) representing the full alignment tree.
-- **`metric(gold, pred, debug=False)`** — Validates both objects against the schema, runs alignment, and returns a dict with `"score"` (float) and `"reasoning"` (human-readable string).
+- **`metric(gold, pred, debug=False, generate_reasoning=None)`** — Validates both objects against the schema, runs alignment, and returns `{"score": ...}` by default, or `{"score": ..., "reasoning": ...}` when reasoning is enabled.
+
+### Migration note
+
+The older `ObjectAligner("name", schema)` constructor form and `get_name()` were removed.
 
 ## Alignment Flow
 

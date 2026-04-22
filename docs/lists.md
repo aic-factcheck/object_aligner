@@ -24,7 +24,7 @@ schema = {
     "items": {"type": "integer", "score": "exact"},
     "order": "fixed"
 }
-aligner = ObjectAligner("quiz", schema)
+aligner = ObjectAligner(schema, generate_reasoning=True)
 
 # Student got 2nd and 3rd right, missed the 1st
 gold = [42, 7, 13]
@@ -74,7 +74,7 @@ schema = {
     "items": {"type": "string", "score": "jaro", "threshold": 0.5},
     "order": "align"
 }
-aligner = ObjectAligner("skills", schema)
+aligner = ObjectAligner(schema, generate_reasoning=True)
 
 gold = ["Python", "JavaScript", "SQL"]
 pred = ["Pythn", "SQL", "JavaScrypt"]
@@ -97,7 +97,7 @@ schema = {
     "items": {"type": "string", "score": "jaro", "threshold": 0.5},
     "order": "align"
 }
-aligner = ObjectAligner("field-names", schema)
+aligner = ObjectAligner(schema, generate_reasoning=True)
 result = aligner.metric(gold, pred)
 print(result["reasoning"])
 ```
@@ -152,7 +152,7 @@ schema = {
     "prefixWeights": [1, 1],  # equal weight for both prefix slots
     "items": {"type": "string"}  # destinations (variable length)
 }
-aligner = ObjectAligner("transport", schema)
+aligner = ObjectAligner(schema, generate_reasoning=True)
 
 gold = ["car", 5, "airport", "downtown"]
 pred = ["cat", 5, "plane"]  # typo in mode, missing one destination
@@ -195,7 +195,7 @@ schema = {
     "ignoreExcess": True,
     "ignoreMissing": True
 }
-aligner = ObjectAligner("vehicles", schema)
+aligner = ObjectAligner(schema, generate_reasoning=True)
 result = aligner.metric(gold, pred)
 print(f"Score: {result['score']:.2f}")
 print(result["reasoning"])

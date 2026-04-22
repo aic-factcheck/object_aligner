@@ -37,7 +37,7 @@ schema = {
     "order": "align"  # order doesn't matter — find best pairing
 }
 
-aligner = ObjectAligner("students", schema)
+aligner = ObjectAligner(schema, generate_reasoning=True)
 result = aligner.metric(gold, pred)
 print(f"Score: {result['score']:.2f}")
 print(result["reasoning"])
@@ -118,7 +118,7 @@ schema = {
     "valueImportance": 1.0
 }
 
-aligner = ObjectAligner("product", schema)
+aligner = ObjectAligner(schema, generate_reasoning=True)
 result = aligner.metric(gold, pred)
 print(f"Score: {result['score']:.2f}")
 print(result["reasoning"])
@@ -166,7 +166,7 @@ schema = {
     "order": "fixed"
 }
 
-aligner = ObjectAligner("orders", schema)
+aligner = ObjectAligner(schema, generate_reasoning=True)
 result = aligner.metric(gold, pred)
 print(f"Score: {result['score']:.2f}")
 print(result["reasoning"])
@@ -252,7 +252,7 @@ schema = {
     "order": "align"
 }
 
-aligner = ObjectAligner("exam-results", schema)
+aligner = ObjectAligner(schema, generate_reasoning=True)
 result = aligner.metric(gold, pred)
 print(f"Score: {result['score']:.2f}")
 print(result["reasoning"])
