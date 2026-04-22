@@ -4,7 +4,7 @@ Project knowledge for AI coding assistants.
 
 ## Project Overview
 
-**object-aligner** is a Python library for computing similarity scores between structured data objects (JSON-like: dicts, lists, primitives). It aligns a "gold" (reference) object with a "predicted" object and produces a fine-grained similarity score in [0, 1] along with a human-readable explanation of differences.
+**object-aligner** is a Python library for computing similarity scores between structured data objects (JSON-like: dicts, lists, primitives). It aligns a "gold" (reference) object with a "predicted" object and produces a fine-grained similarity score in `[0, 1]`, with optional human-readable reasoning and optional structured debug output.
 
 ## Tech Stack
 
@@ -12,6 +12,7 @@ Project knowledge for AI coding assistants.
 - **Package manager:** uv
 - **Build system:** uv_build
 - **Dependencies:** numpy, rapidfuzz, jsonschema, scipy
+- **Test framework:** pytest
 
 ## Project Structure
 
@@ -35,23 +36,62 @@ Project knowledge for AI coding assistants.
 │   ├── nesting.md                    # Complex nested structure examples
 │   ├── metric.md                     # The metric() function & evaluation
 │   └── schema_reference.md           # Complete schema keyword reference
+├── tests/                            # Pytest suite
 └── README.md
 ```
 
 ## Key Concepts
 
-- **ObjectAligner** — Main class, constructed with `(id_, schema)`. Has two primary methods:
-  - `align(gold, pred, skip_validation=False)` → returns MatchItem/MatchList/MatchDict tree
-  - `metric(gold, pred, debug=False)` → returns `{"score": float, "reasoning": str}`
-- **Schema** — JSON Schema–inspired dict that defines data structure + custom scoring keywords (`score`, `threshold`, `order`, `keyScore`, `valueWeight`, etc.)
-- **Match types** — `MatchItem` (primitives), `MatchList` (arrays), `MatchDict` (objects) — all frozen dataclasses with `score` field in [0, 1]
+- **ObjectAligner** — Main class, constructed with:
+  - `ObjectAligner(schema, *, custom_metrics=None, generate_reasoning=False, reasoning_templates=None)`
+- Primary methods:
+  - `align(gold, pred, skip_validation=False)` → returns a `MatchItem` / `MatchList` / `MatchDict` tree
+  - `metric(gold, pred, debug=False, generate_reasoning=None)` → returns `{"score": float}` by default, optionally adding `"reasoning"` and/or `"debug"`
+- **Schema** — JSON Schema–inspired dict that defines data structure plus custom scoring keywords (`score`, `threshold`, `order`, `keyScore`, `valueWeight`, etc.)
+- **Match types** — `MatchItem` (primitives), `MatchList` (arrays), `MatchDict` (objects) — frozen dataclasses with Python `float` scores
+- **Custom metrics** — user-supplied named metric callables registered through `custom_metrics`, referenced declaratively from schema `score`
+
+## Primitive Scoring
+
+### Built-in string metrics
+
+Supported string `score` values:
+- `exact`
+- `jaro` *(default)*
+- `jaro_winkler`
+- `levenshtein`
+- `damerau_levenshtein`
+- `osa`
+- `indel`
+- `lcsseq`
+
+### Built-in numeric metrics
+
+Supported number/integer `score` values:
+- `exact`
+- `invdiff` *(default)*
+
+### Custom primitive metrics
+
+- Supported for schema types: `string`, `number`, `integer`
+- Registered via:
+  - `custom_metrics={"string": {...}, "number": {...}, "integer": {...}}`
+- Metric callable contract:
+  - `(gold, pred) -> float`
+  - must return a real number in `[0, 1]`
+- Integer metric lookup order:
+  1. built-ins
+  2. custom `number` metrics
+  3. custom `integer` metrics override same-name `number` metrics
+- Boolean scoring remains exact-only
+- Object `keyScore` is still only `"exact"` or `"jaro"`
 
 ## Architecture
 
 The alignment dispatcher `_align_helper` routes by Python type:
 - `bool` → `_align_booleans` (exact only)
-- `int/float` → `_align_numbers` (exact or invdiff: `1/(1+|a-b|)`)
-- `str` → `_align_strings` (exact or Jaro similarity via rapidfuzz)
+- `int/float` → `_align_numbers` (registry-based primitive lookup)
+- `str` → `_align_strings` (registry-based primitive lookup)
 - `list` → `_align_lists` → dispatches to:
   - `_align_lists_prefix` (positional prefix items with weights)
   - `_align_lists_fixed` (DP sequence alignment, order preserved)
@@ -60,11 +100,21 @@ The alignment dispatcher `_align_helper` routes by Python type:
 
 All branches are recursive — any nesting depth works naturally.
 
+## Public API Behavior
+
+- `align()` validates by default unless `skip_validation=True`
+- `metric()` always validates `gold`
+- if `pred` fails validation, `metric()` returns `score: 0.0`
+  - with reasoning disabled: `{"score": 0.0}`
+  - with reasoning enabled: `{"score": 0.0, "reasoning": ...}`
+- `metric(..., debug=True)` adds a structured `"debug"` alignment tree using only basic Python container/scalar types
+- public `score` values should be plain Python `float`, not NumPy scalar types
+
 ## Custom Schema Keywords (beyond JSON Schema)
 
 | Keyword | Applies to | Values | Default |
 |---------|-----------|--------|---------|
-| `score` | string, number, integer | `"jaro"`, `"exact"`, `"invdiff"` | `"jaro"` / `"invdiff"` |
+| `score` | string, number, integer | built-in metric name or registered custom metric name | `"jaro"` / `"invdiff"` |
 | `threshold` | string, number, integer | float | `0.0` |
 | `order` | array (items) | `"fixed"`, `"align"` | `"fixed"` |
 | `ignoreExcess` | array | bool | `false` |
@@ -83,19 +133,29 @@ All branches are recursive — any nesting depth works naturally.
 
 ```bash
 uv sync                  # Install dependencies
+uv run pytest            # Run test suite
 uv run python <file>     # Run a Python file in the venv
 uv run python -c "..."   # Run inline Python
 ```
 
 ## Testing
 
-No test framework is currently set up. There are no automated tests yet.
+A pytest suite is present under `tests/`.
+
+Useful subsets:
+
+```bash
+uv run pytest tests/test_primitives.py
+uv run pytest tests/test_api.py
+uv run pytest
+```
 
 ## Important Notes
 
-- All code lives in a single module: `src/object_aligner/object_aligner.py`
+- All core implementation lives in a single module: `src/object_aligner/object_aligner.py`
 - `__init__.py` re-exports `ObjectAligner` from the submodule
 - The notebook `playground_object_aligner.ipynb` is from an older version and is messy — use only for inspiration
-- `metric()` validates both gold and pred against the schema; if pred fails validation, it returns `score: 0.0`
 - Dict key matching ignores value types — a `ValueError` is raised if aligned gold/pred values have different Python types
 - Booleans must be checked before numbers in the dispatcher because `isinstance(True, int)` is `True` in Python
+- Unsupported primitive metric names should raise clear `ValueError`s rather than relying on `assert`
+- Custom metric registry validation happens at construction time
