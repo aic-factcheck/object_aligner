@@ -2,6 +2,10 @@
 
 Python library for aligning structured objects (`dict`, `list`, primitives) and scoring similarity in `[0, 1]`, with optional human-readable reasoning.
 
+## History
+
+This is a cleaned-up, standalone version of the Object Aligner originally developed as part of the [PromptOpt](https://github.com/aic-factcheck/prompt_opt) prompt optimization framework. The original implementation can be found in the [first commit](https://github.com/aic-factcheck/prompt_opt/commit/a6575fa4255b6217551a6303cb073674c4c2bd86) of PromptOpt (Dec 20, 2024).
+
 ## Install
 
 ```bash
