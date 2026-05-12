@@ -2,6 +2,10 @@
 
 Project knowledge for AI coding assistants.
 
+## Commit policy
+
+- **Do not add `Co-Authored-By` trailers (or any other AI-attribution trailer) to commit messages.** Commits should carry only the human author. This applies to every commit, every time.
+
 ## Project Overview
 
 **object-aligner** is a Python library for computing similarity scores between structured data objects (JSON-like: dicts, lists, primitives). It aligns a "gold" (reference) object with a "predicted" object and produces a fine-grained similarity score in `[0, 1]`, with optional human-readable reasoning and optional structured debug output.
@@ -109,6 +113,7 @@ All branches are recursive — any nesting depth works naturally.
   - with reasoning enabled: `{"score": 0.0, "reasoning": ...}`
 - `metric(..., debug=True)` adds a structured `"debug"` alignment tree using only basic Python container/scalar types
 - public `score` values should be plain Python `float`, not NumPy scalar types
+- `ObjectAligner(..., warn_on_ambiguous_mapping=False)` emits a `UserWarning` when id-mapping derivation has tied costs (off by default)
 
 ## Custom Schema Keywords (beyond JSON Schema)
 
@@ -128,6 +133,17 @@ All branches are recursive — any nesting depth works naturally.
 | `keyImportance` | object | float | `1.0` |
 | `valueImportance` | object | float | `1.0` |
 | `valueWeight` | object property | float | `1.0` |
+| `idScope` | string/integer/number primitive (inside an array) | scope name (string) | — |
+| `ref` | string/integer/number primitive | scope name (string) | — |
+
+## Referential Alignment
+
+- `idScope: "<name>"` declares a primitive as the definer of a named id scope; exactly one definer per scope, must be inside an array.
+- `ref: "<name>"` declares a primitive as a reference into a named id scope; any depth, any number per scope.
+- Comparison happens via a discovered bijection between gold and pred ids derived per scope (Hungarian over the definer list with the id field masked); scopes are resolved in topological order of their inter-scope dependencies.
+- Cycles in the dependency graph → `UserWarning`; cycle members align using non-ref properties only.
+- Gold id duplicates or dangling gold refs raise `jsonschema.ValidationError`; pred-side analogs score 0 in place.
+- See `docs/referential.md` for worked examples.
 
 ## Common Commands
 
@@ -159,3 +175,7 @@ uv run pytest
 - Booleans must be checked before numbers in the dispatcher because `isinstance(True, int)` is `True` in Python
 - Unsupported primitive metric names should raise clear `ValueError`s rather than relying on `assert`
 - Custom metric registry validation happens at construction time
+- `MatchItem.kind` is `"id"` for `idScope` fields, `"ref"` for `ref` fields, and `""` (default) otherwise; the debug tree surfaces this as a `"marker"` field when non-empty.
+- `_align_helper` short-circuits on `idScope` (always scores 1.0) and `ref` (scores via the bijection) **before** the type dispatch, so the order in that method matters — see the comment at the top of the method.
+- Per-call referential state (`_current_mappings`, `_pred_ids`, `_gold_ids`, `_pred_excess_ids`, `_mask_scope`, `_mask_all_refs`) lives on the instance and is cleared in a `try/finally` around each `align()` call; concurrent `align()` calls on the same instance are not supported.
+- Future v2: Weisfeiler–Lehman color refinement could disambiguate property-twin definer cases (out of scope for v1).

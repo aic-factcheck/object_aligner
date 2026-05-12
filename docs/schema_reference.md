@@ -64,6 +64,43 @@ No additional keywords. Booleans are always compared exactly.
 
 ---
 
+## Referential ids (`idScope` / `ref`)
+
+Allow a primitive field to act as an *id* whose concrete value is arbitrary;
+other primitives can *reference* such ids and are compared via an inferred
+bijection between gold and predicted ids rather than by raw value equality.
+
+| Keyword | Type | Default | Applies to | Description |
+|---------|------|---------|------------|-------------|
+| `idScope` ⚡ | string | — | `string` / `integer` / `number` primitive **inside an array** | Marks this primitive as the definer of a named id scope. Exactly one definer per scope. |
+| `ref` ⚡ | string | — | `string` / `integer` / `number` primitive | Marks this primitive as a reference into a named id scope. Must match the primitive type of the definer. |
+
+Rules and behavior:
+
+- `idScope` must be placed on a primitive that lives inside an array (so the
+  definers form an alignable list).
+- `ref` may appear anywhere, at any nesting depth (object property, array
+  `items`, array `prefixItems`).
+- Booleans cannot bear `idScope` or `ref`.
+- A `ref` value must point to an `idScope` declared somewhere else in the
+  schema with the **same** primitive type.
+- Any `score` / `threshold` declared on an `idScope`/`ref` field is ignored
+  (with a `UserWarning`) — these fields are compared symbolically.
+- Gold-side integrity: ids must be unique per scope; refs must resolve to
+  existing ids. Violations raise `jsonschema.ValidationError`.
+- Pred-side tolerance: duplicate pred ids are first-wins; dangling pred refs
+  score `0` in place rather than raising.
+- Strict bijection: each gold id maps to at most one pred id and vice versa.
+  When the cost matrix has ties, the Hungarian algorithm picks arbitrarily;
+  pass `ObjectAligner(..., warn_on_ambiguous_mapping=True)` to surface this.
+- Cycles in the scope-dependency graph (e.g. scope A's definers contain refs
+  to scope B and vice versa) trigger a `UserWarning` and fall back to
+  property-only alignment for cycle members.
+
+See [Referential alignment](referential.md) for worked examples.
+
+---
+
 ## Array type (`"type": "array"`)
 
 | Keyword | Type | Default | Description |

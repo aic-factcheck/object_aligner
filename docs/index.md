@@ -46,7 +46,8 @@ The older `ObjectAligner("name", schema)` form and `get_name()` have been remove
 | 4 | [Dictionaries & Objects](dicts.md) | Key matching, value matching, importance weights |
 | 5 | [Nesting & Complex Structures](nesting.md) | Deeply nested data, real-world composite examples |
 | 6 | [The Metric Function](metric.md) | End-to-end evaluation with validation and optional reasoning |
-| 7 | [Schema Reference](schema_reference.md) | Complete reference of all schema keywords |
+| 7 | [Referential Alignment](referential.md) | Matching graphs and multi-graphs whose ids are arbitrary handles |
+| 8 | [Schema Reference](schema_reference.md) | Complete reference of all schema keywords |
 
 ## Installation
 
