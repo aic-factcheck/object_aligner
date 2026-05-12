@@ -1,4 +1,4 @@
-# AGENTS.md
+# CLAUDE.md
 
 Project knowledge for AI coding assistants.
 
