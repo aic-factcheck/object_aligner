@@ -177,5 +177,6 @@ uv run pytest
 - Custom metric registry validation happens at construction time
 - `MatchItem.kind` is `"id"` for `idScope` fields, `"ref"` for `ref` fields, and `""` (default) otherwise; the debug tree surfaces this as a `"marker"` field when non-empty.
 - `_align_helper` short-circuits on `idScope` (always scores 1.0) and `ref` (scores via the bijection) **before** the type dispatch, so the order in that method matters — see the comment at the top of the method.
-- Per-call referential state (`_current_mappings`, `_pred_ids`, `_gold_ids`, `_pred_excess_ids`, `_mask_scope`, `_mask_all_refs`) lives on the instance and is cleared in a `try/finally` around each `align()` call; concurrent `align()` calls on the same instance are not supported.
+- Per-call referential state (`current_mappings`, `pred_ids`, `gold_ids`, `pred_excess_ids`, `mask_scope`, `mask_all_refs`, `skip_validation`) lives in an `_AlignContext` dataclass that `align()` creates per call and threads through `_align_helper` and the recursive `_align_*` methods; concurrent `align()` / `metric()` calls on the same instance are safe.
+- The JSON Schema validator is built once at construction (`self._validator = validator_for(schema)(schema)`) and reused across `align()` / `metric()` calls.
 - Future v2: Weisfeiler–Lehman color refinement could disambiguate property-twin definer cases (out of scope for v1).

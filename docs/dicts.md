@@ -165,13 +165,17 @@ Because keys are matched *before* values, and the value schema is looked up from
 
 > **The types of aligned gold and predicted values must match.**
 
-If a gold key `"age"` maps to an integer 24, but the predicted key `"ages"` maps to a string `"twenty-three"`, the aligner will raise a `ValueError`:
+If a gold key `"age"` maps to an integer 24, but the predicted key `"ages"` maps to a string `"twenty-three"`, the aligner will raise a `TypeError`:
 
 ```
-ValueError: The keys are currently matched ignoring types of the respective values: <class 'int'> != <class 'str'>
+TypeError: dict value types differ for key 'age': int vs str
 ```
 
 This is by design — the schema for a property defines one type, and both the gold and predicted values under that key must conform to it.
+
+### Softer behavior under `skip_validation=True`
+
+When you call `align(gold, pred, skip_validation=True)` (or use `align` directly without validation), the type-mismatch raise is suppressed and the pair is scored as `0` instead. This lets evaluation pipelines tolerate occasional schema-non-conforming predictions without crashing. The `metric()` method validates `pred` against the schema itself and returns `{"score": 0.0}` on validation failure, so the soft-zero branch only surfaces through direct `align(..., skip_validation=True)` use.
 
 ---
 

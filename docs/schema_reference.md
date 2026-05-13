@@ -56,6 +56,10 @@ Custom primitive metrics are supplied through `ObjectAligner(..., custom_metrics
 
 For integer schemas, custom metric lookup checks the `integer` registry first and then falls back to the `number` registry.
 
+### Custom metric name collisions
+
+Custom `score` names registered via `custom_metrics` must not collide with the built-in metric names for the same schema type (e.g. `"exact"`, `"jaro"`, `"invdiff"`). Registering a custom metric whose name shadows a built-in raises `ValueError` at `ObjectAligner` construction.
+
 ---
 
 ## Boolean type (`"type": "boolean"`)

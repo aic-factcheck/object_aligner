@@ -45,7 +45,7 @@ def test_float_precision_mixed_number_types_and_integer_validation():
     integer = ObjectAligner({"type": "integer", "score": "invdiff"})
 
     assert number.metric(1.0000001, 1.0)["score"] > 0.999999
-    with pytest.raises(AssertionError):
+    with pytest.raises(TypeError):
         number.metric(1, 1.0)
     assert integer.metric(1, 1.5)["score"] == 0.0
 
@@ -100,6 +100,6 @@ def test_large_fuzzy_dict_alignment_handles_many_keys():
     assert aligner.align(gold, pred, skip_validation=True).score > 0.9
 
 
-def test_empty_dict_alignment_is_known_issue():
+def test_empty_dict_alignment_scores_one():
     aligner = ObjectAligner({"type": "object", "properties": {}, "keyScore": "exact"})
     assert aligner.metric({}, {})["score"] == 1.0

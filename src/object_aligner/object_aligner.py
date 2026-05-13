@@ -1,3 +1,4 @@
+import string
 import warnings
 from collections.abc import Mapping
 from dataclasses import dataclass, field
@@ -5,7 +6,8 @@ from numbers import Real
 from typing import Any
 
 import numpy as np
-from jsonschema import ValidationError, validate
+from jsonschema import ValidationError
+from jsonschema.validators import validator_for
 from rapidfuzz.distance import DamerauLevenshtein, Indel, Jaro, JaroWinkler, LCSseq, Levenshtein, OSA
 from scipy.optimize import linear_sum_assignment
 
@@ -51,6 +53,23 @@ class _IdScope:
     degraded: bool = False
 
 
+@dataclass
+class _AlignContext:
+    """Per-call state for an ``align()`` invocation.
+
+    Threaded through the recursive ``_align_*`` methods so a single
+    ``ObjectAligner`` instance can be shared across threads — each call
+    creates its own context and never touches the instance's state.
+    """
+    current_mappings: dict = field(default_factory=dict)
+    pred_ids: dict = field(default_factory=dict)
+    gold_ids: dict = field(default_factory=dict)
+    pred_excess_ids: dict = field(default_factory=dict)
+    mask_scope: Any = None
+    mask_all_refs: bool = False
+    skip_validation: bool = False
+
+
 DEFAULT_REASONING_TEMPLATES = {
     "metric.perfect": "The predicted output perfectly matches the gold.",
     "metric.imperfect_intro": "The predicted output scores overall {score_pct}, let us align the predicted output to the gold and analyze the differences:\n",
@@ -58,6 +77,8 @@ DEFAULT_REASONING_TEMPLATES = {
     "item.mismatch": '{indent}The predicted value "{pred}" does not match the gold "{gold}" (score={score_pct}).\n',
     "ref.match": '{indent}The predicted reference "{pred}" matches the gold reference "{gold}" under the inferred id mapping.\n',
     "ref.mismatch": '{indent}The predicted reference "{pred}" does not match the gold reference "{gold}" under the inferred id mapping (score={score_pct}).\n',
+    # id rows are intentionally empty: id fields exist for referential
+    # bookkeeping and should not appear in human-readable reasoning output.
     "id.match": "",
     "id.mismatch": "",
     "list.match": "{indent}The predicted list perfectly matches the gold one:\n",
@@ -70,6 +91,31 @@ DEFAULT_REASONING_TEMPLATES = {
     "dict.key.mismatch": '{indent}KEY = The predicted key "{pred}" does not match the gold "{gold}" (score={score_pct}).\n',
     "dict.value.prefix": "{indent}VALUE = ",
     "validation.error": 'JSON Schema validation failed for path="{path}". Error message: {message}.',
+}
+
+# Placeholders the renderer supplies for each template key. Used by
+# _merge_reasoning_templates to reject user overrides containing typos
+# at construction time instead of at render time. Keep in sync with
+# _ReasoningRenderer.
+_TEMPLATE_PLACEHOLDERS = {
+    "metric.perfect": frozenset(),
+    "metric.imperfect_intro": frozenset({"score", "score_pct"}),
+    "item.match": frozenset({"indent", "gold", "pred", "score", "score_pct"}),
+    "item.mismatch": frozenset({"indent", "gold", "pred", "score", "score_pct"}),
+    "ref.match": frozenset({"indent", "gold", "pred", "score", "score_pct"}),
+    "ref.mismatch": frozenset({"indent", "gold", "pred", "score", "score_pct"}),
+    "id.match": frozenset({"indent", "gold", "pred", "score", "score_pct"}),
+    "id.mismatch": frozenset({"indent", "gold", "pred", "score", "score_pct"}),
+    "list.match": frozenset({"indent", "score", "score_pct"}),
+    "list.mismatch": frozenset({"indent", "score", "score_pct"}),
+    "list.excess": frozenset({"indent", "gold", "pred", "score", "score_pct"}),
+    "list.missing": frozenset({"indent", "gold", "pred", "score", "score_pct"}),
+    "dict.match": frozenset({"indent", "score", "score_pct"}),
+    "dict.mismatch": frozenset({"indent", "score", "score_pct"}),
+    "dict.key.match": frozenset({"indent", "gold", "pred", "score", "score_pct"}),
+    "dict.key.mismatch": frozenset({"indent", "gold", "pred", "score", "score_pct"}),
+    "dict.value.prefix": frozenset({"indent"}),
+    "validation.error": frozenset({"path", "message"}),
 }
 
 
@@ -193,6 +239,11 @@ class _ReasoningRenderer:
                 )
             ]
             for child in aligned.children:
+                if isinstance(child, MatchItem) and child.gold is None and child.pred is None:
+                    # Sentinel emitted by _align_lists_prefix when both sides
+                    # are shorter than prefixItems at this position; nothing
+                    # useful to say to the user.
+                    continue
                 if isinstance(child, MatchItem) and child.gold is None:
                     fragments.append(
                         self.templates["list.excess"].format(
@@ -269,13 +320,9 @@ class ObjectAligner:
         self._reasoning_renderer = _ReasoningRenderer(self.reasoning_templates)
         self._primitive_metrics = self._build_primitive_metric_registry(custom_metrics)
         self._warn_on_ambiguous_mapping = bool(warn_on_ambiguous_mapping)
+        self._validate_importance_sums(schema)
         self._id_scopes, self._scope_order = self._collect_id_scopes(schema)
-        self._current_mappings = {}
-        self._pred_ids = {}
-        self._pred_excess_ids = {}
-        self._gold_ids = {}
-        self._mask_scope = None
-        self._mask_all_refs = False
+        self._validator = validator_for(schema)(schema)
 
     def _merge_reasoning_templates(self, reasoning_templates):
         if reasoning_templates is None:
@@ -287,6 +334,21 @@ class ObjectAligner:
         unknown_keys = sorted(set(overrides) - set(DEFAULT_REASONING_TEMPLATES))
         if unknown_keys:
             raise ValueError(f"Unknown reasoning template keys: {unknown_keys}")
+
+        formatter = string.Formatter()
+        for key, template in overrides.items():
+            if not isinstance(template, str):
+                raise TypeError(
+                    f'reasoning_templates["{key}"] must be a string, got {type(template).__name__}'
+                )
+            allowed = _TEMPLATE_PLACEHOLDERS[key]
+            used = {name for _, name, _, _ in formatter.parse(template) if name}
+            extra = used - allowed
+            if extra:
+                raise ValueError(
+                    f'reasoning_templates["{key}"] uses unknown placeholder(s) '
+                    f'{sorted(extra)}; allowed: {sorted(allowed)}'
+                )
 
         templates = dict(DEFAULT_REASONING_TEMPLATES)
         templates.update(overrides)
@@ -350,6 +412,51 @@ class ObjectAligner:
                 f'Supported scores: {sorted(metrics)}'
             )
         return metrics[metric_name]
+
+    @staticmethod
+    def _validate_importance_sums(schema):
+        """Pre-walk the schema and raise ValueError on any zero-sum
+        importance/weight configuration that would later divide by zero
+        (or produce NaN) in alignment. Walks properties/items/prefixItems
+        same as the id-scope walker."""
+
+        def walk(node, schema_path):
+            if not isinstance(node, dict):
+                return
+            t = node.get("type")
+            if t == "object":
+                ki = node.get("keyImportance", 1.0)
+                vi = node.get("valueImportance", 1.0)
+                if ki + vi == 0:
+                    raise ValueError(
+                        f"keyImportance and valueImportance cannot both be zero at {path2str([str(e) for e in schema_path])}"
+                    )
+            if t == "array":
+                if "prefixItems" in node and "items" in node:
+                    pi = node.get("prefixImportance")
+                    ri = node.get("restImportance")
+                    # presence is enforced lazily in _align_lists; only check
+                    # the zero-sum case when both are explicitly supplied.
+                    if pi is not None and ri is not None and pi + ri == 0:
+                        raise ValueError(
+                            f"prefixImportance and restImportance cannot both be zero at {path2str([str(e) for e in schema_path])}"
+                        )
+                if "prefixItems" in node and "prefixWeights" in node:
+                    pw = node["prefixWeights"]
+                    if isinstance(pw, (list, tuple)) and sum(pw) == 0:
+                        raise ValueError(
+                            f"prefixWeights must not sum to zero at {path2str([str(e) for e in schema_path])}"
+                        )
+            if "properties" in node and isinstance(node["properties"], dict):
+                for k, v in node["properties"].items():
+                    walk(v, schema_path + [("properties", k)])
+            if "items" in node:
+                walk(node["items"], schema_path + [("items",)])
+            if "prefixItems" in node and isinstance(node["prefixItems"], list):
+                for i, sub in enumerate(node["prefixItems"]):
+                    walk(sub, schema_path + [("prefixItems", i)])
+
+        walk(schema, [])
 
     @staticmethod
     def _enclosing_array_path(schema_path):
@@ -590,25 +697,25 @@ class ObjectAligner:
                 node = node["prefixItems"][edge[1]]
         return node
 
-    def _derive_id_mappings(self, gold, pred):
+    def _derive_id_mappings(self, gold, pred, ctx):
         """Derive per-scope bijection in topological order using _align_helper under masking flags."""
         mappings = {}
         pred_excess = {}
         for scope_name in self._scope_order:
             scope = self._id_scopes[scope_name]
-            self._mask_scope = scope_name
-            self._mask_all_refs = scope.degraded
+            ctx.mask_scope = scope_name
+            ctx.mask_all_refs = scope.degraded
             try:
-                mapping, excess = self._derive_single_scope(gold, pred, scope)
+                mapping, excess = self._derive_single_scope(gold, pred, scope, ctx)
             finally:
-                self._mask_scope = None
-                self._mask_all_refs = False
+                ctx.mask_scope = None
+                ctx.mask_all_refs = False
             mappings[scope_name] = mapping
             pred_excess[scope_name] = excess
-            self._current_mappings[scope_name] = mapping
+            ctx.current_mappings[scope_name] = mapping
         return mappings, pred_excess
 
-    def _derive_single_scope(self, gold, pred, scope):
+    def _derive_single_scope(self, gold, pred, scope, ctx):
         item_schema = self._get_schema_node(self.schema, scope.definer_array_path)
         suffix = scope.definer_schema_path[len(scope.definer_array_path):]
 
@@ -634,9 +741,9 @@ class ObjectAligner:
                 g_item = gold_items[i][0]
                 p_item = pred_items[j][0]
                 try:
-                    aligned = self._align_helper(g_item, p_item, item_schema)
+                    aligned = self._align_helper(g_item, p_item, item_schema, ctx)
                     cost[i][j] = aligned["match"].score
-                except Exception:
+                except (TypeError, ValueError, KeyError):
                     cost[i][j] = 0.0
 
         row_ind, col_ind = linear_sum_assignment(-cost)
@@ -709,7 +816,7 @@ class ObjectAligner:
     def _align_strings(self, g, p, schema):
         return self._align_primitive(g, p, schema, schema_type="string", default_score="jaro")
 
-    def _align_lists_reorder(self, gold, pred, schema):
+    def _align_lists_reorder(self, gold, pred, schema, ctx):
         n, m = len(gold), len(pred)
         d = max(n, m)
 
@@ -721,7 +828,7 @@ class ObjectAligner:
 
         for i in range(n):
             for j in range(m):
-                aligned = self._align_helper(gold[i], pred[j], schema["items"])
+                aligned = self._align_helper(gold[i], pred[j], schema["items"], ctx)
                 similarity_matrix[i][j] = aligned["match"].score
                 subs[i][j] = (aligned["gold"], aligned["pred"], aligned["match"])
 
@@ -740,11 +847,11 @@ class ObjectAligner:
                     aligned_pred.append(sp)
                     aligned_scores.append(sscore)
                 else:
-                    if sp:
+                    if sp is not None:
                         aligned_gold.append(None)
                         aligned_pred.append(sp)
                         aligned_scores.append(MatchItem(0.0, gold=None, pred=sp))
-                    if sg:
+                    if sg is not None:
                         aligned_gold.append(sg)
                         aligned_pred.append(None)
                         aligned_scores.append(MatchItem(0.0, gold=sg, pred=None))
@@ -761,10 +868,11 @@ class ObjectAligner:
         if D == 0:
             score = 1.0 if len(aligned_scores) == 0 else 0.0
         else:
-            score = np.sum([s.score for s in aligned_scores]) / D
+            score = float(np.sum([s.score for s in aligned_scores])) / D
+        score = max(0.0, min(1.0, score))
         return {"gold": aligned_gold, "pred": aligned_pred, "match": MatchList(score=score, children=aligned_scores)}
 
-    def _align_lists_fixed(self, gold, pred, schema):
+    def _align_lists_fixed(self, gold, pred, schema, ctx):
         n, m = len(gold), len(pred)
         if n == 0 and m == 0:
             return {"gold": [], "pred": [], "match": MatchList(score=1.0, children=[])}
@@ -785,7 +893,7 @@ class ObjectAligner:
 
         for i in range(1, n + 1):
             for j in range(1, m + 1):
-                aligned = self._align_helper(gold[i - 1], pred[j - 1], schema["items"])
+                aligned = self._align_helper(gold[i - 1], pred[j - 1], schema["items"], ctx)
                 match = dp[i - 1][j - 1] + aligned["match"].score
                 skip_pred = dp[i - 1][j]
                 skip_gold = dp[i][j - 1]
@@ -812,11 +920,11 @@ class ObjectAligner:
                 aligned_pred.append(sp)
                 aligned_scores.append(sscore)
             else:
-                if sp:
+                if sp is not None:
                     aligned_gold.append(None)
                     aligned_pred.append(sp)
                     aligned_scores.append(MatchItem(0.0, gold=None, pred=sp))
-                if sg:
+                if sg is not None:
                     aligned_gold.append(sg)
                     aligned_pred.append(None)
                     aligned_scores.append(MatchItem(0.0, gold=sg, pred=None))
@@ -827,14 +935,16 @@ class ObjectAligner:
                 j -= 1
 
         if i > 0:
-            assert j <= 0
+            if j > 0:
+                raise RuntimeError("internal: DP traceback ended with both indices positive")
             while i > 0:
                 aligned_gold.append(subs[i][1][0])
                 aligned_pred.append(None)
                 aligned_scores.append(MatchItem(0.0, gold=subs[i][1][0], pred=None))
                 i -= 1
         if j > 0:
-            assert i <= 0
+            if i > 0:
+                raise RuntimeError("internal: DP traceback ended with both indices positive")
             while j > 0:
                 aligned_gold.append(None)
                 aligned_pred.append(subs[1][j][1])
@@ -845,49 +955,73 @@ class ObjectAligner:
         aligned_pred.reverse()
         aligned_scores.reverse()
 
-        assert len(aligned_gold) == len(aligned_pred)
+        if len(aligned_gold) != len(aligned_pred):
+            raise RuntimeError("internal: aligned gold/pred length mismatch")
         D = self._list_norm(aligned_gold, aligned_pred, schema)
         if D == 0:
             score = 1.0 if len(aligned_scores) == 0 else 0.0
         else:
-            score = dp[n][m] / D
+            score = float(dp[n][m]) / D
+        score = max(0.0, min(1.0, score))
         return {"gold": aligned_gold, "pred": aligned_pred, "match": MatchList(score=score, children=aligned_scores)}
 
-    def _align_lists_prefix(self, gold, pred, schema):
+    def _align_lists_prefix(self, gold, pred, schema, ctx):
         aligned_gold = []
         aligned_pred = []
         aligned_matches = []
-        for g, p, schema_ in zip(gold, pred, schema["prefixItems"]):
-            aligned = self._align_helper(g, p, schema_)
-            aligned_gold.append(aligned["gold"])
-            aligned_pred.append(aligned["pred"])
-            aligned_matches.append(aligned["match"])
-        weights = np.array(schema.get("prefixWeights", np.ones(len(aligned_gold))), dtype=np.float64)
+        prefix_items = schema["prefixItems"]
+        for i, sub_schema in enumerate(prefix_items):
+            g_present = i < len(gold)
+            p_present = i < len(pred)
+            if g_present and p_present:
+                aligned = self._align_helper(gold[i], pred[i], sub_schema, ctx)
+                aligned_gold.append(aligned["gold"])
+                aligned_pred.append(aligned["pred"])
+                aligned_matches.append(aligned["match"])
+            elif g_present:
+                aligned_gold.append(gold[i])
+                aligned_pred.append(None)
+                aligned_matches.append(MatchItem(score=0.0, gold=gold[i], pred=None))
+            elif p_present:
+                aligned_gold.append(None)
+                aligned_pred.append(pred[i])
+                aligned_matches.append(MatchItem(score=0.0, gold=None, pred=pred[i]))
+            else:
+                # Both sides shorter than len(prefixItems). Emit a sentinel
+                # pair so the denominator (sum of prefixWeights) stays
+                # correct; renderer skips dual-None children silently.
+                aligned_gold.append(None)
+                aligned_pred.append(None)
+                aligned_matches.append(MatchItem(score=0.0, gold=None, pred=None))
+        weights = np.array(schema.get("prefixWeights", np.ones(len(aligned_matches))), dtype=np.float64)
         weights = weights / weights.sum()
-        score = np.sum([e.score * w for e, w in zip(aligned_matches, weights)])
-        ret = {"gold": aligned_gold, "pred": aligned_pred, "match": MatchList(score=score, children=aligned_matches)}
-        return ret
+        score = float(np.sum([e.score * w for e, w in zip(aligned_matches, weights)]))
+        score = max(0.0, min(1.0, score))
+        return {"gold": aligned_gold, "pred": aligned_pred, "match": MatchList(score=score, children=aligned_matches)}
 
-    def _align_lists(self, g, p, schema):
-        assert "prefixItems" in schema or "items" in schema
+    def _align_lists(self, g, p, schema, ctx):
+        if "prefixItems" not in schema and "items" not in schema:
+            raise ValueError("array schema must declare 'prefixItems' or 'items'")
 
         rets = []
         prefix_len = 0
         if "prefixItems" in schema:
             prefix_len = len(schema["prefixItems"])
-            rets.append(self._align_lists_prefix(g[:prefix_len], p[:prefix_len], schema))
+            rets.append(self._align_lists_prefix(g[:prefix_len], p[:prefix_len], schema, ctx))
 
         if "items" in schema:
             ordering = schema.get("order", "fixed")
-            assert ordering in ["align", "fixed"]
+            if ordering not in ("align", "fixed"):
+                raise ValueError(f"'order' must be 'align' or 'fixed', got {ordering!r}")
             if ordering == "fixed":
-                rets.append(self._align_lists_fixed(g[prefix_len:], p[prefix_len:], schema))
+                rets.append(self._align_lists_fixed(g[prefix_len:], p[prefix_len:], schema, ctx))
             else:
-                rets.append(self._align_lists_reorder(g[prefix_len:], p[prefix_len:], schema))
+                rets.append(self._align_lists_reorder(g[prefix_len:], p[prefix_len:], schema, ctx))
 
         if len(rets) == 1:
             return rets[0]
-        assert "prefixImportance" in schema and "restImportance" in schema, "prefixImportance and restImportance must be set if both prefixItems and items are present!"
+        if "prefixImportance" not in schema or "restImportance" not in schema:
+            raise ValueError("'prefixImportance' and 'restImportance' must both be set when both 'prefixItems' and 'items' are present")
         pi = schema["prefixImportance"]
         ri = schema["restImportance"]
         impsum = pi + ri
@@ -901,9 +1035,10 @@ class ObjectAligner:
         children = rets[0]["match"].children + rets[1]["match"].children
         return {"gold": gold, "pred": pred, "match": MatchList(score=score, children=children)}
 
-    def _align_dicts(self, g, p, schema):
+    def _align_dicts(self, g, p, schema, ctx):
         match_key = schema.get("keyScore", "jaro")
-        assert match_key in ["exact", "jaro"]
+        if match_key not in ("exact", "jaro"):
+            raise ValueError(f"'keyScore' must be 'exact' or 'jaro', got {match_key!r}")
         key_threshold = schema.get("keyThreshold", 0.0)
         scoref = similarity_exact if match_key == "exact" else similarity_string_jaro
 
@@ -937,11 +1072,11 @@ class ObjectAligner:
                     aligned_pkeys.append(sp)
                     aligned_key_scores.append(sim)
                 else:
-                    if sp:
+                    if sp is not None:
                         aligned_gkeys.append(None)
                         aligned_pkeys.append(sp)
                         aligned_key_scores.append(sim)
-                    if sg:
+                    if sg is not None:
                         aligned_gkeys.append(sg)
                         aligned_pkeys.append(None)
                         aligned_key_scores.append(sim)
@@ -954,28 +1089,36 @@ class ObjectAligner:
                 aligned_pkeys.append(pkeys[ci])
                 aligned_key_scores.append(0.0)
 
-        keys_score = np.mean(aligned_key_scores)
+        keys_score = float(np.mean(aligned_key_scores))
 
         aligned_values = []
         value_weights = []
         for gk, pk in zip(aligned_gkeys, aligned_pkeys):
             ag = g.get(gk)
             ap = p.get(pk)
-            assert gk is not None or pk is not None, "At least one has to be aligned, check key alignment above!"
+            if gk is None and pk is None:
+                raise ValueError("dict alignment produced a key pair with both sides None (None used as a dict key?)")
             if gk is not None and pk is not None:
                 aux_schema = schema["properties"][gk]
                 value_weights.append(schema["properties"][gk].get("valueWeight", 1.0))
 
-                if type(ag) != type(ap):
-                    raise ValueError(f"The keys are currently matched ignoring types of the respective values: {type(ag)} != {type(ap)}")
-                aligned_value = self._align_helper(ag, ap, aux_schema)
+                if type(ag) is not type(ap):
+                    if ctx.skip_validation:
+                        # Soft-zero under skip_validation: caller opted into
+                        # looser semantics, so type-mismatched values score 0
+                        # rather than raising.
+                        aligned_value = {"gold": ag, "pred": ap, "match": MatchItem(score=0.0, gold=ag, pred=ap)}
+                    else:
+                        raise TypeError(f"dict value types differ for key {gk!r}: {type(ag).__name__} vs {type(ap).__name__}")
+                else:
+                    aligned_value = self._align_helper(ag, ap, aux_schema, ctx)
             else:
                 aligned_value = {"gold": ag, "pred": ap, "match": MatchItem(score=0.0, gold=ag, pred=ap)}
                 value_weights.append(1.0)
             aligned_values.append(aligned_value)
         value_scores = np.array([e["match"].score for e in aligned_values])
         value_weights = np.array(value_weights) / np.sum(value_weights)
-        values_score = np.sum(value_weights * value_scores)
+        values_score = float(np.sum(value_weights * value_scores))
 
         aligned_gold = {}
         aligned_pred = {}
@@ -987,25 +1130,38 @@ class ObjectAligner:
                 aligned_pred[pk] = aligned_value["pred"]
             children[MatchItem(score=key_score, gold=gk, pred=pk)] = aligned_value["match"]
 
-        score = (key_importance * keys_score + value_importance * values_score) / (key_importance + value_importance)
+        score = float(key_importance * keys_score + value_importance * values_score) / (key_importance + value_importance)
+        score = max(0.0, min(1.0, score))
         return {"gold": aligned_gold, "pred": aligned_pred, "match": MatchDict(score=score, children=children)}
 
     def _align_booleans(self, g, p, schema):
         score = similarity_exact(g, p)
         return {"gold": g, "pred": p, "match": MatchItem(score=score, gold=g, pred=p)}
 
-    def _align_helper(self, g, p, schema):
+    def _align_helper(self, g, p, schema, ctx):
         if isinstance(schema, dict):
             if schema.get("idScope") is not None:
                 return {"gold": g, "pred": p, "match": MatchItem(score=1.0, gold=g, pred=p, kind="id")}
             ref_scope = schema.get("ref")
             if ref_scope is not None:
-                if self._mask_all_refs or ref_scope == self._mask_scope:
+                # Two mask cases handled by this branch:
+                #  * `ctx.mask_scope == ref_scope`: we're computing the cost
+                #    matrix for this scope's own definers, so refs into the
+                #    scope must score 1.0 to avoid self-referential
+                #    bootstrapping.
+                #  * `ctx.mask_all_refs`: this scope is a cycle member and is
+                #    being aligned property-only; treat all refs as 1.0.
+                if ctx.mask_all_refs or ref_scope == ctx.mask_scope:
                     return {"gold": g, "pred": p, "match": MatchItem(score=1.0, gold=g, pred=p, kind="ref")}
-                if ref_scope not in self._current_mappings:
+                # Defensive fallback: under correct topological ordering,
+                # any non-masked scope referenced here should already be in
+                # `ctx.current_mappings`. Reaching this line implies either a
+                # cycle that escaped detection or a future regression in
+                # `_collect_id_scopes` / `_toposort_scopes`.
+                if ref_scope not in ctx.current_mappings:
                     return {"gold": g, "pred": p, "match": MatchItem(score=1.0, gold=g, pred=p, kind="ref")}
-                mapping = self._current_mappings[ref_scope]
-                pred_ids = self._pred_ids.get(ref_scope, set())
+                mapping = ctx.current_mappings[ref_scope]
+                pred_ids = ctx.pred_ids.get(ref_scope, set())
                 mapped = mapping.get(g)
                 if mapped is None or p not in pred_ids:
                     score = 0.0
@@ -1015,24 +1171,28 @@ class ObjectAligner:
                     score = 0.0
                 return {"gold": g, "pred": p, "match": MatchItem(score=score, gold=g, pred=p, kind="ref")}
         if isinstance(g, bool):
-            assert schema["type"] == "boolean", schema["type"]
+            if schema.get("type") != "boolean":
+                raise TypeError(f"schema declares type={schema.get('type')!r} but data is bool")
             aligned = self._align_booleans(g, p, schema)
         elif isinstance(g, (int, float)):
-            assert schema["type"] in ["number", "integer"], schema["type"]
+            if schema.get("type") not in ("number", "integer"):
+                raise TypeError(f"schema declares type={schema.get('type')!r} but data is {type(g).__name__}")
             aligned = self._align_numbers(g, p, schema)
         elif isinstance(g, str):
-            assert schema["type"] == "string", schema["type"]
+            if schema.get("type") != "string":
+                raise TypeError(f"schema declares type={schema.get('type')!r} but data is str")
             aligned = self._align_strings(g, p, schema)
         elif isinstance(g, list):
-            assert schema["type"] == "array", schema["type"]
-            aligned = self._align_lists(g, p, schema)
+            if schema.get("type") != "array":
+                raise TypeError(f"schema declares type={schema.get('type')!r} but data is list")
+            aligned = self._align_lists(g, p, schema, ctx)
         elif isinstance(g, dict):
-            assert schema["type"] == "object", schema["type"]
-            aligned = self._align_dicts(g, p, schema)
+            if schema.get("type") != "object":
+                raise TypeError(f"schema declares type={schema.get('type')!r} but data is dict")
+            aligned = self._align_dicts(g, p, schema, ctx)
         else:
-            raise ValueError(f"Not yet implemented for {type(g)}!")
+            raise TypeError(f"unsupported data type: {type(g).__name__}")
 
-        assert 0 <= aligned["match"].score <= 1, aligned
         return aligned
 
     def _serialize_match_debug(self, aligned):
@@ -1070,29 +1230,45 @@ class ObjectAligner:
         raise TypeError(f"Unknown match instance: {aligned!r}")
 
     def align(self, g, p, skip_validation=False):
-        assert type(g) == type(p), f"The schemas must be the same, got different types: {type(g)} and {type(p)}"
+        """Align ``g`` (gold) to ``p`` (pred) and return a match tree.
+
+        Returns a ``MatchItem`` / ``MatchList`` / ``MatchDict`` whose ``.score``
+        is in ``[0, 1]``. ``gold`` and ``pred`` are both validated against the
+        schema unless ``skip_validation=True``.
+
+        Each call builds its own per-call context, so concurrent calls on the
+        same ``ObjectAligner`` instance are safe.
+        """
+        if type(g) is not type(p):
+            raise TypeError(f"gold and pred must be the same type, got {type(g).__name__} and {type(p).__name__}")
         if not skip_validation:
-            validate(instance=g, schema=self.schema)
-            validate(instance=p, schema=self.schema)
-        try:
-            if self._id_scopes:
-                self._gold_ids = self._validate_referential(g)
-                self._pred_ids = self._collect_pred_ids(p)
-                self._current_mappings, self._pred_excess_ids = self._derive_id_mappings(g, p)
-            return self._align_helper(g, p, self.schema)["match"]
-        finally:
-            self._gold_ids = {}
-            self._pred_ids = {}
-            self._current_mappings = {}
-            self._pred_excess_ids = {}
+            self._validator.validate(g)
+            self._validator.validate(p)
+        ctx = _AlignContext(skip_validation=bool(skip_validation))
+        if self._id_scopes:
+            ctx.gold_ids = self._validate_referential(g)
+            ctx.pred_ids = self._collect_pred_ids(p)
+            ctx.current_mappings, ctx.pred_excess_ids = self._derive_id_mappings(g, p, ctx)
+        return self._align_helper(g, p, self.schema, ctx)["match"]
 
     def metric(self, gold, pred, debug=False, generate_reasoning=None):
-        validate(instance=gold, schema=self.schema)
+        """Score ``pred`` against ``gold`` and return a result dict.
+
+        Always validates ``gold`` against the schema. If ``pred`` fails
+        validation, returns ``{"score": 0.0}`` (with ``"reasoning"`` describing
+        the validation error when reasoning is enabled). Otherwise returns
+        ``{"score": float}`` plus optional ``"reasoning"`` and ``"debug"``
+        entries.
+
+        Like ``align()``, this method is safe to call concurrently on a single
+        instance.
+        """
+        self._validator.validate(gold)
 
         should_generate_reasoning = self.generate_reasoning_default if generate_reasoning is None else generate_reasoning
 
         try:
-            validate(instance=pred, schema=self.schema)
+            self._validator.validate(pred)
         except ValidationError as e:
             if should_generate_reasoning:
                 return {"score": 0.0, "reasoning": self._reasoning_renderer.render_validation_error(e)}

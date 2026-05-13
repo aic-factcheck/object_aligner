@@ -417,6 +417,16 @@ result is non-deterministic for this input.
   version.
 - **`keyScore` is not a reference.** Dict keys can't carry `idScope` or
   `ref` — only values can.
+- **Schema walk coverage.** `idScope` and `ref` are discovered only under
+  `properties`, `items`, and `prefixItems`. Declarations buried inside
+  `allOf`, `anyOf`, `oneOf`, `$ref`, `additionalProperties`, or
+  `patternProperties` are not picked up — a stray `ref` of that shape will
+  raise at construction as `'ref' to undefined idScope`.
+- **Per-call context.** Each `ObjectAligner.align()` / `metric()` call
+  creates its own `_AlignContext` carrying the per-call referential
+  bookkeeping (current mappings, pred id sets, masking flags). No state
+  is mutated on the instance, so concurrent calls on a single aligner
+  are safe.
 
 ---
 

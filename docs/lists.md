@@ -54,10 +54,12 @@ print(result["reasoning"])
 
 Output:
 ```
-The predicted output scores overall 48%, let us align...
-  The predicted list item "title" is excessive, it was not in the gold.
-  The predicted output misses the "weight" list item from the gold.
-  ...
+The predicted output scores overall 25%, let us align...
+The predicted list scores 25%:
+  The predicted output misses the "1" list item from the gold.
+  The predicted value "2" exactly matches the gold.
+  The predicted output misses the "4" list item from the gold.
+  The predicted list item "3" is excessive, it was not in the gold.
 ```
 
 ---

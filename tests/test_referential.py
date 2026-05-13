@@ -676,3 +676,93 @@ def test_match_item_kind_field_returned_from_align():
     walk(match)
     assert found_ref
     assert found_id
+
+
+# ---------------------------------------------------------------------------
+# Documented limitation: idScope under JSON Schema composition keywords
+# (oneOf/anyOf/allOf/$ref/additionalProperties/patternProperties) is not
+# discovered. See docs/referential.md "Limitations".
+# ---------------------------------------------------------------------------
+
+def test_idscope_inside_oneof_is_not_discovered():
+    schema = {
+        "type": "object",
+        "properties": {
+            "items": {
+                "type": "array",
+                "items": {
+                    "oneOf": [
+                        {
+                            "type": "object",
+                            "properties": {
+                                "id": {"type": "integer", "idScope": "thing"},
+                            },
+                        }
+                    ],
+                },
+            },
+        },
+    }
+    aligner = ObjectAligner(schema)
+    assert aligner._id_scopes == {}
+
+
+def test_ref_to_idscope_hidden_in_oneof_raises_at_construction():
+    schema = {
+        "type": "object",
+        "properties": {
+            "items": {
+                "type": "array",
+                "items": {
+                    "oneOf": [
+                        {
+                            "type": "object",
+                            "properties": {
+                                "id": {"type": "integer", "idScope": "thing"},
+                            },
+                        }
+                    ],
+                },
+            },
+            "refs": {
+                "type": "array",
+                "items": {"type": "integer", "ref": "thing"},
+            },
+        },
+    }
+    with pytest.raises(ValueError, match="undefined idScope 'thing'"):
+        ObjectAligner(schema)
+
+
+# ---------------------------------------------------------------------------
+# Concurrency: one aligner instance, many threads.
+# ---------------------------------------------------------------------------
+
+def test_align_is_safe_to_call_concurrently_on_one_instance():
+    from concurrent.futures import ThreadPoolExecutor
+
+    aligner = ObjectAligner(RELATIONS_SCHEMA)
+    baseline = aligner.align(PARENT_CHILD_GOLD, PARENT_CHILD_PRED_RENAMED).score
+
+    def run(_):
+        return aligner.align(PARENT_CHILD_GOLD, PARENT_CHILD_PRED_RENAMED).score
+
+    with ThreadPoolExecutor(max_workers=8) as ex:
+        results = list(ex.map(run, range(32)))
+
+    assert all(r == baseline for r in results)
+
+
+def test_metric_is_safe_to_call_concurrently_on_one_instance():
+    from concurrent.futures import ThreadPoolExecutor
+
+    aligner = ObjectAligner(RELATIONS_SCHEMA)
+    baseline = aligner.metric(PARENT_CHILD_GOLD, PARENT_CHILD_PRED_RENAMED)["score"]
+
+    def run(_):
+        return aligner.metric(PARENT_CHILD_GOLD, PARENT_CHILD_PRED_RENAMED)["score"]
+
+    with ThreadPoolExecutor(max_workers=8) as ex:
+        results = list(ex.map(run, range(32)))
+
+    assert all(r == baseline for r in results)

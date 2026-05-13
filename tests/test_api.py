@@ -222,6 +222,25 @@ def test_reasoning_template_unknown_key_raises():
 
 
 
+def test_reasoning_template_unknown_placeholder_raises_at_construction():
+    with pytest.raises(ValueError, match="unknown placeholder"):
+        ObjectAligner(
+            {"type": "string", "score": "exact"},
+            reasoning_templates={"item.mismatch": "{indent}got {goldd} vs {pred}\n"},
+        )
+
+
+def test_reasoning_template_partial_placeholders_are_allowed():
+    aligner = ObjectAligner(
+        {"type": "string", "score": "exact"},
+        generate_reasoning=True,
+        reasoning_templates={"item.mismatch": "{indent}mismatch\n"},
+    )
+    result = aligner.metric("hello", "world")
+    assert "mismatch" in result["reasoning"]
+
+
+
 def test_custom_metrics_must_be_a_mapping():
     with pytest.raises(TypeError, match="custom_metrics must be a mapping"):
         ObjectAligner({"type": "string"}, custom_metrics=[("string", {})])
@@ -373,3 +392,42 @@ def test_metric_validation_edge_cases_cover_nested_type_and_item_constraints():
 
     assert bounded_list.metric([1, 2], [1]) == {"score": 0.0}
     assert bounded_list.metric([1, 2], [1, 2, 3, 4]) == {"score": 0.0}
+
+
+def test_custom_metric_returning_numpy_scalar_coerces_to_python_float():
+    import numpy as np
+
+    def np_metric(g, p):
+        return np.float64(0.42)
+
+    schema = {
+        "type": "object",
+        "properties": {
+            "name": {"type": "string", "score": "np_constant"},
+        },
+        "keyScore": "exact",
+    }
+    aligner = ObjectAligner(
+        schema,
+        custom_metrics={"string": {"np_constant": np_metric}},
+    )
+
+    result = aligner.metric({"name": "x"}, {"name": "y"})
+    assert type(result["score"]) is float
+
+    aligned = aligner.align({"name": "x"}, {"name": "y"})
+
+    def walk_check(node):
+        if isinstance(node, MatchItem):
+            assert type(node.score) is float, f"MatchItem.score should be Python float, got {type(node.score)}"
+        elif isinstance(node, MatchList):
+            assert type(node.score) is float
+            for c in node.children:
+                walk_check(c)
+        elif isinstance(node, MatchDict):
+            assert type(node.score) is float
+            for k, v in node.children.items():
+                walk_check(k)
+                walk_check(v)
+
+    walk_check(aligned)

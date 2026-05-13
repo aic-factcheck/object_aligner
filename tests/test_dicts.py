@@ -102,6 +102,45 @@ def test_key_and_value_importance_follow_documented_formula():
     assert unbalanced.align(gold, pred).score == pytest.approx(0.4375)
 
 
+def test_empty_string_dict_key_is_not_dropped_exact():
+    aligner = ObjectAligner({
+        "type": "object",
+        "properties": {"": {"type": "integer", "score": "exact"},
+                       "a": {"type": "integer", "score": "exact"}},
+        "keyScore": "exact",
+    })
+    match = aligner.align({"": 1, "a": 2}, {"a": 2, "b": 3}, skip_validation=True)
+    seen_gold_keys = [k.gold for k in match.children]
+    seen_pred_keys = [k.pred for k in match.children]
+    assert "" in seen_gold_keys  # falsy gold key not silently dropped
+    assert "a" in seen_gold_keys
+    assert "b" in seen_pred_keys
+
+
+def test_empty_string_dict_key_is_not_dropped_jaro():
+    aligner = ObjectAligner({
+        "type": "object",
+        "properties": {"": {"type": "integer", "score": "exact"},
+                       "a": {"type": "integer", "score": "exact"}},
+        "keyScore": "jaro",
+        "keyThreshold": 0.99,  # force "" vs "b" to fall below threshold → score 0
+    })
+    match = aligner.align({"": 1, "a": 2}, {"a": 2, "b": 3}, skip_validation=True)
+    seen_gold_keys = [k.gold for k in match.children]
+    assert "" in seen_gold_keys
+
+
+def test_key_value_importance_sum_zero_raises_at_construction():
+    with pytest.raises(ValueError, match="keyImportance and valueImportance"):
+        ObjectAligner({
+            "type": "object",
+            "properties": {"a": {"type": "integer", "score": "exact"}},
+            "keyScore": "exact",
+            "keyImportance": 0.0,
+            "valueImportance": 0.0,
+        })
+
+
 def test_value_weights_affect_value_score():
     aligner = ObjectAligner({
             "type": "object",
@@ -147,7 +186,7 @@ def test_missing_and_extra_keys_produce_zero_scored_value_matches():
         ({"colour": "red"}, {"color": 1}),
     ],
 )
-def test_type_mismatch_raises_value_error_when_keys_align(gold, pred):
+def test_type_mismatch_softens_to_zero_under_skip_validation(gold, pred):
     properties = {next(iter(gold.keys())): {"type": "integer" if isinstance(next(iter(gold.values())), int) else "string"}}
     if "colour" in gold:
         properties = {"colour": {"type": "string"}}
@@ -165,5 +204,16 @@ def test_type_mismatch_raises_value_error_when_keys_align(gold, pred):
         }
 
     aligner = ObjectAligner(schema)
-    with pytest.raises(ValueError):
-        aligner.align(gold, pred, skip_validation=True)
+    # With skip_validation=True the caller opted into looser semantics;
+    # type-mismatched values score 0 rather than raising. The dict's
+    # overall score may still be non-zero if the key match contributes.
+    match = aligner.align(gold, pred, skip_validation=True)
+    value_matches = list(match.children.values())
+    assert len(value_matches) == 1
+    assert value_matches[0].score == 0.0
+
+    # Without skip_validation the schema-side validation catches the bad
+    # pred before alignment reaches the type-mismatch branch.
+    from jsonschema import ValidationError
+    with pytest.raises((ValidationError, TypeError)):
+        aligner.align(gold, pred)
