@@ -50,6 +50,7 @@ The older `ObjectAligner("name", schema)` form and `get_name()` have been remove
 | 8 | [Schema Reference](schema_reference.md) | Complete reference of all schema keywords |
 | 9 | [Per-Property Score Attribution](attribution.md) | Decompose the deficit into ranked per-path contributions |
 | 10 | [Scored JSON-Patch Repair](repair.md) | Ranked structured repair operations with estimated score deltas |
+| 11 | [Prompt-Optimizer Feedback](feedback.md) | Top-K ranked prescriptive feedback strings for optimizer reflection slots |
 
 ## Installation
 

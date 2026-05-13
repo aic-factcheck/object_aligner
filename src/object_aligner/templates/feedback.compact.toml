@@ -1,0 +1,33 @@
+# Sparse "compact"-style overlay on top of feedback.toml.
+#
+# Only the keys whose phrasing changes for compact style are listed here;
+# every other key falls through to the feedback.toml default. The renderer
+# layers them as: defaults → compact overrides (if style=='compact') →
+# user overrides → final dict.
+#
+# Placeholders for each key match feedback.toml; see that file for the full
+# allowlist documentation.
+
+"feedback.intro.imperfect" = "Score {score:.2f}. Top {n_shown}/{n_total} fixes:\n"
+
+"feedback.op.primitive_replace" = "{rank}. {path}: {gold} (got {pred}) [+{score_delta:.3f}]"
+
+"feedback.op.primitive_replace_reorder" = "{rank}. {list_path}: replace {pred}->{gold} [+{score_delta:.3f}]"
+
+"feedback.op.key_add" = '{rank}. {path}: add "{key}"={gold} [+{score_delta:.3f}]'
+
+"feedback.op.key_remove" = '{rank}. {path}: remove "{key}" [+{score_delta:.3f}]'
+
+"feedback.op.key_rename_add" = '{rank}. {gold_path}: rename "{pred_key}"->"{gold_key}" [+{score_delta:.3f}]'
+
+"feedback.op.list_item_add" = "{rank}. {path}: add item {gold} [+{score_delta:.3f}]"
+
+"feedback.op.list_item_remove" = "{rank}. {path}: remove item {pred} [+{score_delta:.3f}]"
+
+"feedback.op.list_item_missing" = "{rank}. {list_path}: add item {gold} [+{score_delta:.3f}]"
+
+"feedback.op.list_item_excess" = "{rank}. {list_path}: remove item {pred} [+{score_delta:.3f}]"
+
+"feedback.op.ref_fix" = "{rank}. {path}: ref {pred}->{gold} [+{score_delta:.3f}]"
+
+"feedback.op.subtree_replace" = "{rank}. {path}: replace subtree [+{score_delta:.3f}]"

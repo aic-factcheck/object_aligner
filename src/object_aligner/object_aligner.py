@@ -1,4 +1,3 @@
-import string
 import warnings
 from collections.abc import Mapping
 from dataclasses import dataclass, field
@@ -10,6 +9,8 @@ from jsonschema import ValidationError
 from jsonschema.validators import validator_for
 from rapidfuzz.distance import DamerauLevenshtein, Indel, Jaro, JaroWinkler, LCSseq, Levenshtein, OSA
 from scipy.optimize import linear_sum_assignment
+
+from object_aligner._templates import _load_packaged_template, validate_templates
 
 
 @dataclass(frozen=True)
@@ -71,28 +72,11 @@ class _AlignContext:
     skip_validation: bool = False
 
 
-DEFAULT_REASONING_TEMPLATES = {
-    "metric.perfect": "The predicted output perfectly matches the gold.",
-    "metric.imperfect_intro": "The predicted output scores overall {score_pct}, let us align the predicted output to the gold and analyze the differences:\n",
-    "item.match": '{indent}The predicted value "{pred}" exactly matches the gold.\n',
-    "item.mismatch": '{indent}The predicted value "{pred}" does not match the gold "{gold}" (score={score_pct}).\n',
-    "ref.match": '{indent}The predicted reference "{pred}" matches the gold reference "{gold}" under the inferred id mapping.\n',
-    "ref.mismatch": '{indent}The predicted reference "{pred}" does not match the gold reference "{gold}" under the inferred id mapping (score={score_pct}).\n',
-    # id rows are intentionally empty: id fields exist for referential
-    # bookkeeping and should not appear in human-readable reasoning output.
-    "id.match": "",
-    "id.mismatch": "",
-    "list.match": "{indent}The predicted list perfectly matches the gold one:\n",
-    "list.mismatch": "{indent}The predicted list scores {score_pct}:\n",
-    "list.excess": '{indent}The predicted list item "{pred}" is excessive, it was not in the gold.\n',
-    "list.missing": '{indent}The predicted output misses the "{gold}" list item from the gold.\n',
-    "dict.match": "{indent}The predicted dictionary perfectly matches the gold one:\n",
-    "dict.mismatch": "{indent}The predicted dictionary scores {score_pct}:\n",
-    "dict.key.match": '{indent}KEY = The predicted key "{pred}" exactly matches the gold.\n',
-    "dict.key.mismatch": '{indent}KEY = The predicted key "{pred}" does not match the gold "{gold}" (score={score_pct}).\n',
-    "dict.value.prefix": "{indent}VALUE = ",
-    "validation.error": 'JSON Schema validation failed for path="{path}". Error message: {message}.',
-}
+# Default reasoning templates ship as TOML data under
+# ``src/object_aligner/templates/reasoning.toml`` and are loaded at import time.
+# Editing the wording is a data-file edit; the Python source only holds the
+# placeholder allowlist (the renderer's API contract).
+DEFAULT_REASONING_TEMPLATES = _load_packaged_template("reasoning.toml")
 
 # Placeholders the renderer supplies for each template key. Used by
 # _merge_reasoning_templates to reject user overrides containing typos
@@ -118,6 +102,18 @@ _TEMPLATE_PLACEHOLDERS = {
     "dict.value.prefix": frozenset({"indent"}),
     "validation.error": frozenset({"path", "message"}),
 }
+
+# Self-check: surface typos in the shipped reasoning.toml at import time
+# rather than at first render. Treats the defaults as if they were user
+# overrides (None defaults dict is unsupported, so pass them as overrides
+# of themselves) — any mismatch between a default template's placeholders
+# and _TEMPLATE_PLACEHOLDERS raises here.
+validate_templates(
+    DEFAULT_REASONING_TEMPLATES,
+    DEFAULT_REASONING_TEMPLATES,
+    _TEMPLATE_PLACEHOLDERS,
+    kind="reasoning",
+)
 
 
 def path2str(p):
@@ -300,7 +296,19 @@ class _ReasoningRenderer:
 
 
 class ObjectAligner:
-    def __init__(self, schema, *, custom_metrics=None, generate_reasoning=False, reasoning_templates=None, warn_on_ambiguous_mapping=False):
+    def __init__(
+        self,
+        schema,
+        *,
+        custom_metrics=None,
+        generate_reasoning=False,
+        reasoning_templates=None,
+        generate_feedback=False,
+        feedback_templates=None,
+        feedback_style="gepa",
+        dominant_fraction_threshold=0.60,
+        warn_on_ambiguous_mapping=False,
+    ):
         """Create an object aligner.
 
         custom_metrics maps schema types ("string", "number", "integer") to
@@ -310,15 +318,53 @@ class ObjectAligner:
         metrics unless overridden by a custom ``integer`` metric with the same
         name.
 
+        ``generate_reasoning`` / ``reasoning_templates`` configure the human-
+        readable whole-tree reasoning output produced by ``metric()``.
+
+        ``generate_feedback`` / ``feedback_templates`` / ``feedback_style`` /
+        ``dominant_fraction_threshold`` configure the prompt-optimizer
+        feedback output. See ``docs/feedback.md``. The defaults render a
+        ``"gepa"``-style top-5 message with a synthesis line; the
+        ``dominant_fraction_threshold`` controls when the synthesis line
+        switches between "single dominant" and "mixed" phrasing.
+
         warn_on_ambiguous_mapping enables a ``UserWarning`` whenever the
         Hungarian-derived id mapping for an ``idScope`` is non-unique because
         of tied costs. Off by default.
         """
+        from object_aligner.feedback import (
+            _FeedbackRenderer,
+            _VALID_STYLES,
+            merge_feedback_templates,
+        )
 
         self.schema = schema
         self.generate_reasoning_default = generate_reasoning
         self.reasoning_templates = self._merge_reasoning_templates(reasoning_templates)
         self._reasoning_renderer = _ReasoningRenderer(self.reasoning_templates)
+
+        self.generate_feedback_default = generate_feedback
+        if feedback_style not in _VALID_STYLES:
+            raise ValueError(
+                f"feedback_style must be one of {_VALID_STYLES!r}, "
+                f"got {feedback_style!r}"
+            )
+        self.feedback_style_default = feedback_style
+        try:
+            self.dominant_fraction_threshold_default = float(
+                dominant_fraction_threshold
+            )
+        except (TypeError, ValueError) as e:
+            raise ValueError(
+                "dominant_fraction_threshold must be a real number"
+            ) from e
+        self.feedback_templates = merge_feedback_templates(feedback_templates)
+        self._feedback_renderer = _FeedbackRenderer(
+            templates=self.feedback_templates,
+            value_formatter=None,
+            dominant_fraction_threshold=self.dominant_fraction_threshold_default,
+        )
+
         self._primitive_metrics = self._build_primitive_metric_registry(custom_metrics)
         self._warn_on_ambiguous_mapping = bool(warn_on_ambiguous_mapping)
         self._validate_importance_sums(schema)
@@ -326,34 +372,12 @@ class ObjectAligner:
         self._validator = validator_for(schema)(schema)
 
     def _merge_reasoning_templates(self, reasoning_templates):
-        if reasoning_templates is None:
-            return dict(DEFAULT_REASONING_TEMPLATES)
-        if not isinstance(reasoning_templates, Mapping):
-            raise TypeError("reasoning_templates must be a mapping of template keys to strings")
-
-        overrides = dict(reasoning_templates)
-        unknown_keys = sorted(set(overrides) - set(DEFAULT_REASONING_TEMPLATES))
-        if unknown_keys:
-            raise ValueError(f"Unknown reasoning template keys: {unknown_keys}")
-
-        formatter = string.Formatter()
-        for key, template in overrides.items():
-            if not isinstance(template, str):
-                raise TypeError(
-                    f'reasoning_templates["{key}"] must be a string, got {type(template).__name__}'
-                )
-            allowed = _TEMPLATE_PLACEHOLDERS[key]
-            used = {name for _, name, _, _ in formatter.parse(template) if name}
-            extra = used - allowed
-            if extra:
-                raise ValueError(
-                    f'reasoning_templates["{key}"] uses unknown placeholder(s) '
-                    f'{sorted(extra)}; allowed: {sorted(allowed)}'
-                )
-
-        templates = dict(DEFAULT_REASONING_TEMPLATES)
-        templates.update(overrides)
-        return templates
+        return validate_templates(
+            reasoning_templates,
+            DEFAULT_REASONING_TEMPLATES,
+            _TEMPLATE_PLACEHOLDERS,
+            kind="reasoning",
+        )
 
     def _build_primitive_metric_registry(self, custom_metrics):
         if custom_metrics is None:
@@ -1400,33 +1424,195 @@ class ObjectAligner:
             min_contribution=min_contribution,
         )
 
-    def metric(self, gold, pred, debug=False, generate_reasoning=None):
+    def feedback(
+        self,
+        gold,
+        pred,
+        *,
+        top_k=5,
+        min_score_delta=0.0,
+        style=None,
+        include_synthesis_line=True,
+        include_metadata=False,
+        dominant_fraction_threshold=None,
+        granularity="leaf",
+        skip_validation=False,
+    ):
+        """Render prompt-optimizer feedback for ``(gold, pred)``.
+
+        Aligns once internally and walks the repair tree; never invokes an
+        LLM. Returns a ``FeedbackResult`` whose ``.text`` is suitable for
+        pasting into a DSPy / GEPA / TextGrad reflection slot. See
+        ``docs/feedback.md`` for the full surface and examples.
+
+        Validation mirrors ``repair()`` / ``attribute()``: validates ``gold``
+        against the schema; if ``pred`` fails validation returns a degenerate
+        ``FeedbackResult`` with ``score=0.0`` and a rendered validation-error
+        message as ``text``.
+        """
+        from object_aligner.feedback import FeedbackResult, render_feedback
+
+        if not skip_validation:
+            self._validator.validate(gold)
+            try:
+                self._validator.validate(pred)
+            except ValidationError as e:
+                resolved_style = style or self.feedback_style_default
+                error_text = self.feedback_templates[
+                    "feedback.validation_error"
+                ].format(path=path2str(e.path), message=e.message)
+                return FeedbackResult(
+                    score=0.0,
+                    text=error_text,
+                    entries=(),
+                    style=resolved_style,
+                    truncated=False,
+                    n_total_ops=0,
+                    error_breakdown={},
+                )
+
+        match_tree, ctx = self._align_with_ctx(gold, pred, skip_validation=True)
+        repair_result = self.repair_from_match(
+            match_tree, gold, pred, ctx.current_mappings,
+            granularity=granularity,
+        )
+        return render_feedback(
+            repair_result,
+            top_k=top_k,
+            min_score_delta=min_score_delta,
+            style=style or self.feedback_style_default,
+            include_synthesis_line=include_synthesis_line,
+            include_metadata=include_metadata,
+            templates=self.feedback_templates,
+            dominant_fraction_threshold=(
+                self.dominant_fraction_threshold_default
+                if dominant_fraction_threshold is None
+                else dominant_fraction_threshold
+            ),
+        )
+
+    def feedback_from_match(
+        self,
+        match_tree,
+        gold,
+        pred,
+        mappings=None,
+        *,
+        top_k=5,
+        min_score_delta=0.0,
+        style=None,
+        include_synthesis_line=True,
+        include_metadata=False,
+        dominant_fraction_threshold=None,
+        granularity="leaf",
+    ):
+        """Render feedback from an already-computed match tree.
+
+        ``mappings`` is the ``ctx.current_mappings`` dict from the align-time
+        context, needed for ``ref_fix`` ops. If your schema has no ``ref``
+        fields it can be ``None`` or ``{}``.
+        """
+        from object_aligner.feedback import render_feedback
+
+        repair_result = self.repair_from_match(
+            match_tree, gold, pred, mappings,
+            granularity=granularity,
+        )
+        return render_feedback(
+            repair_result,
+            top_k=top_k,
+            min_score_delta=min_score_delta,
+            style=style or self.feedback_style_default,
+            include_synthesis_line=include_synthesis_line,
+            include_metadata=include_metadata,
+            templates=self.feedback_templates,
+            dominant_fraction_threshold=(
+                self.dominant_fraction_threshold_default
+                if dominant_fraction_threshold is None
+                else dominant_fraction_threshold
+            ),
+        )
+
+    def metric(
+        self,
+        gold,
+        pred,
+        debug=False,
+        generate_reasoning=None,
+        generate_feedback=None,
+    ):
         """Score ``pred`` against ``gold`` and return a result dict.
 
         Always validates ``gold`` against the schema. If ``pred`` fails
         validation, returns ``{"score": 0.0}`` (with ``"reasoning"`` describing
-        the validation error when reasoning is enabled). Otherwise returns
-        ``{"score": float}`` plus optional ``"reasoning"`` and ``"debug"``
-        entries.
+        the validation error when reasoning is enabled, and likewise for
+        ``"feedback"``). Otherwise returns ``{"score": float}`` plus optional
+        ``"reasoning"``, ``"feedback"``, and ``"debug"`` entries.
+
+        ``generate_feedback`` accepts ``None`` (use the instance default),
+        ``False`` / ``True`` (a string under ``"feedback"``), or ``"full"``
+        (a structured ``dict`` of basic types — the same shape as
+        ``FeedbackResult.to_dict()``). Any other value raises ``ValueError``.
 
         Like ``align()``, this method is safe to call concurrently on a single
         instance.
         """
         self._validator.validate(gold)
 
-        should_generate_reasoning = self.generate_reasoning_default if generate_reasoning is None else generate_reasoning
+        should_generate_reasoning = (
+            self.generate_reasoning_default
+            if generate_reasoning is None
+            else generate_reasoning
+        )
+        feedback_mode = (
+            self.generate_feedback_default
+            if generate_feedback is None
+            else generate_feedback
+        )
+        if feedback_mode not in (False, True, "full"):
+            raise ValueError(
+                "generate_feedback must be None, False, True, or 'full'; "
+                f"got {generate_feedback!r}"
+            )
 
         try:
             self._validator.validate(pred)
         except ValidationError as e:
+            result = {"score": 0.0}
             if should_generate_reasoning:
-                return {"score": 0.0, "reasoning": self._reasoning_renderer.render_validation_error(e)}
-            return {"score": 0.0}
+                result["reasoning"] = (
+                    self._reasoning_renderer.render_validation_error(e)
+                )
+            if feedback_mode:
+                error_text = self.feedback_templates[
+                    "feedback.validation_error"
+                ].format(path=path2str(e.path), message=e.message)
+                if feedback_mode == "full":
+                    result["feedback"] = {
+                        "score": 0.0,
+                        "text": error_text,
+                        "entries": [],
+                        "style": self.feedback_style_default,
+                        "truncated": False,
+                        "n_total_ops": 0,
+                        "error_breakdown": {},
+                    }
+                else:
+                    result["feedback"] = error_text
+            return result
 
-        aligned = self.align(gold, pred, skip_validation=True)
-        result = {"score": float(aligned.score)}
+        match_tree, ctx = self._align_with_ctx(gold, pred, skip_validation=True)
+        result = {"score": float(match_tree.score)}
         if should_generate_reasoning:
-            result["reasoning"] = self._reasoning_renderer.render(aligned)
+            result["reasoning"] = self._reasoning_renderer.render(match_tree)
+        if feedback_mode:
+            fb = self.feedback_from_match(
+                match_tree, gold, pred, ctx.current_mappings,
+                include_metadata=(feedback_mode == "full"),
+            )
+            result["feedback"] = (
+                fb.to_dict() if feedback_mode == "full" else fb.text
+            )
         if debug:
-            result["debug"] = self._serialize_match_debug(aligned)
+            result["debug"] = self._serialize_match_debug(match_tree)
         return result

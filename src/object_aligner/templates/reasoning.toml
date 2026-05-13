@@ -1,0 +1,51 @@
+# Whole-tree reasoning templates used by ObjectAligner.metric() when
+# generate_reasoning=True. Substituted via Python str.format() — placeholder
+# names below match each key's entry in _TEMPLATE_PLACEHOLDERS
+# (src/object_aligner/object_aligner.py).
+#
+# Override individual keys by passing reasoning_templates={...} to
+# ObjectAligner(...) or by maintaining your own TOML file and loading it
+# with load_templates_from_toml().
+#
+# All values are TOML "basic" (double-quoted) strings so that `\n` is
+# interpreted as a real newline. Embedded `"` characters are escaped as `\"`.
+
+# (no placeholders)
+"metric.perfect" = "The predicted output perfectly matches the gold."
+
+# Placeholders: score, score_pct
+"metric.imperfect_intro" = "The predicted output scores overall {score_pct}, let us align the predicted output to the gold and analyze the differences:\n"
+
+# Placeholders: indent, gold, pred, score, score_pct
+"item.match"     = "{indent}The predicted value \"{pred}\" exactly matches the gold.\n"
+"item.mismatch"  = "{indent}The predicted value \"{pred}\" does not match the gold \"{gold}\" (score={score_pct}).\n"
+
+"ref.match"      = "{indent}The predicted reference \"{pred}\" matches the gold reference \"{gold}\" under the inferred id mapping.\n"
+"ref.mismatch"   = "{indent}The predicted reference \"{pred}\" does not match the gold reference \"{gold}\" under the inferred id mapping (score={score_pct}).\n"
+
+# id rows are intentionally empty: id fields exist for referential bookkeeping
+# and should not appear in human-readable reasoning output.
+"id.match"       = ""
+"id.mismatch"    = ""
+
+# Placeholders: indent, score, score_pct
+"list.match"     = "{indent}The predicted list perfectly matches the gold one:\n"
+"list.mismatch"  = "{indent}The predicted list scores {score_pct}:\n"
+
+# Placeholders: indent, gold, pred, score, score_pct
+"list.excess"    = "{indent}The predicted list item \"{pred}\" is excessive, it was not in the gold.\n"
+"list.missing"   = "{indent}The predicted output misses the \"{gold}\" list item from the gold.\n"
+
+# Placeholders: indent, score, score_pct
+"dict.match"     = "{indent}The predicted dictionary perfectly matches the gold one:\n"
+"dict.mismatch"  = "{indent}The predicted dictionary scores {score_pct}:\n"
+
+# Placeholders: indent, gold, pred, score, score_pct
+"dict.key.match"    = "{indent}KEY = The predicted key \"{pred}\" exactly matches the gold.\n"
+"dict.key.mismatch" = "{indent}KEY = The predicted key \"{pred}\" does not match the gold \"{gold}\" (score={score_pct}).\n"
+
+# Placeholders: indent
+"dict.value.prefix" = "{indent}VALUE = "
+
+# Placeholders: path, message
+"validation.error" = "JSON Schema validation failed for path=\"{path}\". Error message: {message}."

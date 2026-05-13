@@ -1,0 +1,66 @@
+# Top-K prescriptive feedback templates — "gepa"-style baseline used by
+# aligner.feedback() and aligner.metric(generate_feedback=True). Rendered
+# via Python str.format(); placeholder names below match each key's entry
+# in _FEEDBACK_PLACEHOLDERS (src/object_aligner/feedback.py).
+#
+# Override individual keys by passing feedback_templates={...} to
+# ObjectAligner(...) or by maintaining your own TOML file and loading it
+# with load_templates_from_toml().
+#
+# For the compact-style overlay see feedback.compact.toml.
+
+# Placeholders: score, score_pct
+"feedback.intro.perfect" = "The prediction perfectly matches the gold (score 1.00)."
+
+# Placeholders: score, score_pct, deficit, deficit_pct, n_shown, n_total
+"feedback.intro.imperfect" = "The prediction scored {score:.2f} (deficit {deficit:.2f}). Top {n_shown} of {n_total} fix locations:\n"
+
+# Placeholders: rank, path, gold, pred, score_delta, score_delta_pct
+"feedback.op.primitive_replace" = "{rank}. {path}: expected {gold}, got {pred}. Fixing this recovers +{score_delta:.3f}."
+
+# Placeholders: rank, list_path, gold, pred, score_delta, score_delta_pct
+"feedback.op.primitive_replace_reorder" = "{rank}. inside list {list_path}: replace item {pred} with {gold}. Fixing this recovers +{score_delta:.3f}."
+
+# Placeholders: rank, path, key, gold, score_delta, score_delta_pct
+"feedback.op.key_add" = '{rank}. {path}: missing key "{key}" with value {gold}. Adding it recovers +{score_delta:.3f}.'
+
+# Placeholders: rank, path, key, pred, score_delta, score_delta_pct
+"feedback.op.key_remove" = '{rank}. {path}: extraneous key "{key}" (value {pred}). Removing it recovers +{score_delta:.3f}.'
+
+# Placeholders: rank, gold_path, pred_path, gold_key, pred_key, gold, score_delta, score_delta_pct
+"feedback.op.key_rename_add" = '{rank}. rename key "{pred_key}" -> "{gold_key}" at {gold_path} (value {gold}). Fixing this recovers +{score_delta:.3f}.'
+
+# Default empty — silenced; the paired key_rename_add carries the line.
+# Override to a non-empty string to render both halves.
+# Placeholders (if you customize): rank, pred_path, pred_key, pred
+"feedback.op.key_rename_remove" = ""
+
+# Placeholders: rank, path, gold, score_delta, score_delta_pct
+"feedback.op.list_item_add" = "{rank}. {path}: missing list item {gold}. Adding it recovers +{score_delta:.3f}."
+
+# Placeholders: rank, path, pred, score_delta, score_delta_pct
+"feedback.op.list_item_remove" = "{rank}. {path}: extraneous list item {pred}. Removing it recovers +{score_delta:.3f}."
+
+# Placeholders: rank, list_path, gold, score_delta, score_delta_pct
+"feedback.op.list_item_missing" = "{rank}. {list_path}: list is missing item {gold}. Adding it recovers +{score_delta:.3f}."
+
+# Placeholders: rank, list_path, pred, score_delta, score_delta_pct
+"feedback.op.list_item_excess" = "{rank}. {list_path}: list has extraneous item {pred}. Removing it recovers +{score_delta:.3f}."
+
+# Placeholders: rank, path, gold, pred, score_delta, score_delta_pct
+"feedback.op.ref_fix" = "{rank}. {path}: wrong reference (expected {gold}, got {pred}). Fixing this recovers +{score_delta:.3f}."
+
+# Placeholders: rank, path, score_delta, score_delta_pct
+"feedback.op.subtree_replace" = "{rank}. {path}: subtree differs. Replacing it recovers +{score_delta:.3f}."
+
+# Placeholders: dominant_kind, dominant_kind_human, dominant_fraction, dominant_fraction_pct
+"feedback.synthesis.single_dominant" = "\nFocus on {dominant_kind_human} errors — they account for {dominant_fraction_pct:.0f}% of the deficit shown."
+
+# Placeholders: top_kinds
+"feedback.synthesis.mixed" = "\nThe deficit is spread across multiple issue types ({top_kinds})."
+
+# Placeholders: score, score_pct
+"feedback.empty" = "The prediction scored {score:.2f}; no individually significant fix locations under the current filter."
+
+# Placeholders: path, message
+"feedback.validation_error" = "Prediction failed schema validation at {path}: {message}"
