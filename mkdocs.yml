@@ -40,7 +40,7 @@ nav:
   - Dictionaries & Objects: dicts.md
   - Nesting & Complex Structures: nesting.md
   - The Metric Function: metric.md
-  - Plain-English Reasoning: reasoning.md
+  - Plain-English Description: describe.md
   - Referential Alignment: referential.md
   - Schema Reference: schema_reference.md
   - Per-Property Score Attribution: attribution.md

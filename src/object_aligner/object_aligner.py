@@ -10,8 +10,6 @@ from jsonschema.validators import validator_for
 from rapidfuzz.distance import DamerauLevenshtein, Indel, Jaro, JaroWinkler, LCSseq, Levenshtein, OSA
 from scipy.optimize import linear_sum_assignment
 
-from object_aligner._templates import _load_packaged_template, validate_templates
-
 
 @dataclass(frozen=True)
 class MatchItem:
@@ -87,6 +85,30 @@ class MatchDict:
         object.__setattr__(self, "score", float(self.score))
 
 
+# Cross-module imports are placed here — *after* the MatchItem/MatchList/
+# MatchDict dataclass definitions — so that the modules below (which all
+# import those names at their own top level) can resolve them off the
+# partially-loaded ``object_aligner.object_aligner`` module.
+#
+# The one genuinely-circular pair (``describe._walk`` needs the Match types
+# at render time) is still broken by a lazy import inside that function.
+from object_aligner.attribution import AttributionResult, tree_walk_attribution
+from object_aligner.repair import RepairResult, generate_repairs
+from object_aligner.describe import (
+    DescriptionResult,
+    _VALID_STYLES as _DESCRIBE_VALID_STYLES,
+    merge_description_templates,
+    render_description,
+    render_validation_error as render_description_validation_error,
+)
+from object_aligner.feedback import (
+    FeedbackResult,
+    _VALID_STYLES as _FEEDBACK_VALID_STYLES,
+    merge_feedback_templates,
+    render_feedback,
+)
+
+
 @dataclass
 class _IdScope:
     scope: str
@@ -114,50 +136,6 @@ class _AlignContext:
     mask_scope: Any = None
     mask_all_refs: bool = False
     skip_validation: bool = False
-
-
-# Default reasoning templates ship as TOML data under
-# ``src/object_aligner/templates/reasoning.toml`` and are loaded at import time.
-# Editing the wording is a data-file edit; the Python source only holds the
-# placeholder allowlist (the renderer's API contract).
-DEFAULT_REASONING_TEMPLATES = _load_packaged_template("reasoning.toml")
-
-# Placeholders the renderer supplies for each template key. Used by
-# _merge_reasoning_templates to reject user overrides containing typos
-# at construction time instead of at render time. Keep in sync with
-# _ReasoningRenderer.
-_TEMPLATE_PLACEHOLDERS = {
-    "metric.perfect": frozenset(),
-    "metric.imperfect_intro": frozenset({"score", "score_pct"}),
-    "item.match": frozenset({"indent", "gold", "pred", "score", "score_pct"}),
-    "item.mismatch": frozenset({"indent", "gold", "pred", "score", "score_pct"}),
-    "ref.match": frozenset({"indent", "gold", "pred", "score", "score_pct"}),
-    "ref.mismatch": frozenset({"indent", "gold", "pred", "score", "score_pct"}),
-    "id.match": frozenset({"indent", "gold", "pred", "score", "score_pct"}),
-    "id.mismatch": frozenset({"indent", "gold", "pred", "score", "score_pct"}),
-    "list.match": frozenset({"indent", "score", "score_pct"}),
-    "list.mismatch": frozenset({"indent", "score", "score_pct"}),
-    "list.excess": frozenset({"indent", "gold", "pred", "score", "score_pct"}),
-    "list.missing": frozenset({"indent", "gold", "pred", "score", "score_pct"}),
-    "dict.match": frozenset({"indent", "score", "score_pct"}),
-    "dict.mismatch": frozenset({"indent", "score", "score_pct"}),
-    "dict.key.match": frozenset({"indent", "gold", "pred", "score", "score_pct"}),
-    "dict.key.mismatch": frozenset({"indent", "gold", "pred", "score", "score_pct"}),
-    "dict.value.prefix": frozenset({"indent"}),
-    "validation.error": frozenset({"path", "message"}),
-}
-
-# Self-check: surface typos in the shipped reasoning.toml at import time
-# rather than at first render. Treats the defaults as if they were user
-# overrides (None defaults dict is unsupported, so pass them as overrides
-# of themselves) — any mismatch between a default template's placeholders
-# and _TEMPLATE_PLACEHOLDERS raises here.
-validate_templates(
-    DEFAULT_REASONING_TEMPLATES,
-    DEFAULT_REASONING_TEMPLATES,
-    _TEMPLATE_PLACEHOLDERS,
-    kind="reasoning",
-)
 
 
 def path2str(p):
@@ -219,10 +197,6 @@ BUILTIN_NUMBER_METRICS = {
 SUPPORTED_CUSTOM_METRIC_TYPES = frozenset({"string", "number", "integer"})
 
 
-def to_pct_str(v):
-    return f"{100 * v:.0f}%"
-
-
 def to_python_value(value):
     if isinstance(value, np.generic):
         return value.item()
@@ -233,110 +207,6 @@ def to_python_value(value):
     if isinstance(value, dict):
         return {to_python_value(key): to_python_value(item) for key, item in value.items()}
     return value
-
-
-class _ReasoningRenderer:
-    def __init__(self, templates):
-        self.templates = templates
-
-    def render(self, aligned):
-        if aligned.score == 1.0:
-            return self.templates["metric.perfect"]
-        reasoning = self.templates["metric.imperfect_intro"].format(
-            score=aligned.score,
-            score_pct=to_pct_str(aligned.score),
-        )
-        reasoning += self._render_match(aligned, level=0).rstrip()
-        return reasoning
-
-    def render_validation_error(self, error):
-        return self.templates["validation.error"].format(
-            path=path2str(error.path),
-            message=error.message,
-        )
-
-    def _render_match(self, aligned, level=0):
-        indent = "  " * level
-        child_indent = "  " * (level + 1)
-
-        if isinstance(aligned, MatchItem):
-            kind = getattr(aligned, "kind", "") or "item"
-            template_key = f"{kind}.match" if aligned.score == 1.0 else f"{kind}.mismatch"
-            return self.templates[template_key].format(
-                indent=indent,
-                gold=aligned.gold,
-                pred=aligned.pred,
-                score=aligned.score,
-                score_pct=to_pct_str(aligned.score),
-            )
-
-        if isinstance(aligned, MatchList):
-            template_key = "list.match" if aligned.score == 1.0 else "list.mismatch"
-            fragments = [
-                self.templates[template_key].format(
-                    indent=indent,
-                    score=aligned.score,
-                    score_pct=to_pct_str(aligned.score),
-                )
-            ]
-            for child in aligned.children:
-                if isinstance(child, MatchItem) and child.gold is None and child.pred is None:
-                    # Sentinel emitted by _align_lists_prefix when both sides
-                    # are shorter than prefixItems at this position; nothing
-                    # useful to say to the user.
-                    continue
-                if isinstance(child, MatchItem) and child.gold is None:
-                    fragments.append(
-                        self.templates["list.excess"].format(
-                            indent=child_indent,
-                            pred=child.pred,
-                            gold=child.gold,
-                            score=child.score,
-                            score_pct=to_pct_str(child.score),
-                        )
-                    )
-                elif isinstance(child, MatchItem) and child.pred is None:
-                    fragments.append(
-                        self.templates["list.missing"].format(
-                            indent=child_indent,
-                            gold=child.gold,
-                            pred=child.pred,
-                            score=child.score,
-                            score_pct=to_pct_str(child.score),
-                        )
-                    )
-                else:
-                    fragments.append(self._render_match(child, level=level + 1))
-            return "".join(fragments)
-
-        if isinstance(aligned, MatchDict):
-            template_key = "dict.match" if aligned.score == 1.0 else "dict.mismatch"
-            fragments = [
-                self.templates[template_key].format(
-                    indent=indent,
-                    score=aligned.score,
-                    score_pct=to_pct_str(aligned.score),
-                )
-            ]
-            for key, child in aligned.children.items():
-                key_template_key = "dict.key.match" if key.score == 1.0 else "dict.key.mismatch"
-                fragments.append(
-                    self.templates[key_template_key].format(
-                        indent=child_indent,
-                        gold=key.gold,
-                        pred=key.pred,
-                        score=key.score,
-                        score_pct=to_pct_str(key.score),
-                    )
-                )
-                fragments.append(
-                    self.templates["dict.value.prefix"].format(indent=child_indent)
-                    + self._render_match(child, level=level + 1).lstrip()
-                    + "\n"
-                )
-            return "".join(fragments)
-
-        raise AssertionError(f"Unknown match instance: {aligned}")
 
 
 class ObjectAligner:
@@ -361,8 +231,9 @@ class ObjectAligner:
         schema,
         *,
         custom_metrics=None,
-        generate_reasoning=False,
-        reasoning_templates=None,
+        generate_description=False,
+        description_templates=None,
+        description_style="default",
         generate_feedback=False,
         feedback_templates=None,
         feedback_style="gepa",
@@ -383,20 +254,24 @@ class ObjectAligner:
                 `number` metrics unless overridden by a custom `integer`
                 metric with the same name. Boolean scoring is exact-only
                 and cannot be customized.
-            generate_reasoning: Default for the `generate_reasoning`
-                parameter of `metric()`. When `True`, `metric()` returns
-                include a `"reasoning"` string key. See
-                [`docs/reasoning.md`](../reasoning.md).
-            reasoning_templates: Optional partial override of the packaged
-                reasoning templates. Unknown keys or unknown placeholders
-                raise `ValueError`.
+            generate_description: Default for the `generate_description`
+                parameter of `metric()`. When truthy, `metric()` returns
+                include a `"description"` key. Accepts `True` / `False` /
+                `"full"`; see [`docs/describe.md`](../describe.md).
+            description_templates: Optional partial override of the
+                packaged description templates. Unknown keys or unknown
+                placeholders raise `ValueError`.
+            description_style: One of the registered description styles
+                (default `"default"`). Controls whether the renderer
+                produces prose (`"default"`) or empty `.text` plus
+                populated `.entries` (`"json"`).
             generate_feedback: Default for the `generate_feedback`
                 parameter of `metric()`. When truthy, `metric()` returns
                 include a `"feedback"` key. Accepts `True` / `False` /
                 `"full"`; see [`docs/feedback.md`](../feedback.md).
             feedback_templates: Optional partial override of the packaged
                 feedback templates. Validated against the same allowlist
-                machinery as `reasoning_templates`.
+                machinery as `description_templates`.
             feedback_style: One of the registered feedback styles
                 (default `"gepa"`). Controls phrasing and synthesis-line
                 shape.
@@ -410,26 +285,27 @@ class ObjectAligner:
 
         Raises:
             ValueError: If `custom_metrics` contains an unsupported schema
-                type, collides with a built-in metric name, or
-                `feedback_style` is not a registered style.
+                type, collides with a built-in metric name,
+                `feedback_style` is not a registered style, or
+                `description_style` is not a registered style.
             jsonschema.SchemaError: If `schema` itself is not a valid JSON
                 Schema.
         """
-        from object_aligner.feedback import (
-            _FeedbackRenderer,
-            _VALID_STYLES,
-            merge_feedback_templates,
-        )
-
         self.schema = schema
-        self.generate_reasoning_default = generate_reasoning
-        self.reasoning_templates = self._merge_reasoning_templates(reasoning_templates)
-        self._reasoning_renderer = _ReasoningRenderer(self.reasoning_templates)
+
+        self.generate_description_default = generate_description
+        if description_style not in _DESCRIBE_VALID_STYLES:
+            raise ValueError(
+                f"description_style must be one of {_DESCRIBE_VALID_STYLES!r}, "
+                f"got {description_style!r}"
+            )
+        self.description_style_default = description_style
+        self.description_templates = merge_description_templates(description_templates)
 
         self.generate_feedback_default = generate_feedback
-        if feedback_style not in _VALID_STYLES:
+        if feedback_style not in _FEEDBACK_VALID_STYLES:
             raise ValueError(
-                f"feedback_style must be one of {_VALID_STYLES!r}, "
+                f"feedback_style must be one of {_FEEDBACK_VALID_STYLES!r}, "
                 f"got {feedback_style!r}"
             )
         self.feedback_style_default = feedback_style
@@ -442,25 +318,12 @@ class ObjectAligner:
                 "dominant_fraction_threshold must be a real number"
             ) from e
         self.feedback_templates = merge_feedback_templates(feedback_templates)
-        self._feedback_renderer = _FeedbackRenderer(
-            templates=self.feedback_templates,
-            value_formatter=None,
-            dominant_fraction_threshold=self.dominant_fraction_threshold_default,
-        )
 
         self._primitive_metrics = self._build_primitive_metric_registry(custom_metrics)
         self._warn_on_ambiguous_mapping = bool(warn_on_ambiguous_mapping)
         self._validate_importance_sums(schema)
         self._id_scopes, self._scope_order = self._collect_id_scopes(schema)
         self._validator = validator_for(schema)(schema)
-
-    def _merge_reasoning_templates(self, reasoning_templates):
-        return validate_templates(
-            reasoning_templates,
-            DEFAULT_REASONING_TEMPLATES,
-            _TEMPLATE_PLACEHOLDERS,
-            kind="reasoning",
-        )
 
     def _build_primitive_metric_registry(self, custom_metrics):
         if custom_metrics is None:
@@ -522,6 +385,21 @@ class ObjectAligner:
         return metrics[metric_name]
 
     @staticmethod
+    def _iter_schema_children(node, schema_path):
+        """Yield ``(child_node, child_schema_path)`` for each declared
+        descent edge (``properties`` / ``items`` / ``prefixItems``)."""
+        if not isinstance(node, dict):
+            return
+        if "properties" in node and isinstance(node["properties"], dict):
+            for k, v in node["properties"].items():
+                yield v, schema_path + [("properties", k)]
+        if "items" in node:
+            yield node["items"], schema_path + [("items",)]
+        if "prefixItems" in node and isinstance(node["prefixItems"], list):
+            for i, sub in enumerate(node["prefixItems"]):
+                yield sub, schema_path + [("prefixItems", i)]
+
+    @staticmethod
     def _validate_importance_sums(schema):
         """Pre-walk the schema and raise ValueError on any zero-sum
         importance/weight configuration that would later divide by zero
@@ -539,6 +417,16 @@ class ObjectAligner:
                     raise ValueError(
                         f"keyImportance and valueImportance cannot both be zero at {path2str([str(e) for e in schema_path])}"
                     )
+                if "properties" in node and isinstance(node["properties"], dict):
+                    vws = [
+                        p.get("valueWeight", 1.0)
+                        for p in node["properties"].values()
+                        if isinstance(p, dict)
+                    ]
+                    if vws and sum(vws) == 0:
+                        raise ValueError(
+                            f"valueWeights across properties must not sum to zero at {path2str([str(e) for e in schema_path])}"
+                        )
             if t == "array":
                 if "prefixItems" in node and "items" in node:
                     pi = node.get("prefixImportance")
@@ -555,14 +443,8 @@ class ObjectAligner:
                         raise ValueError(
                             f"prefixWeights must not sum to zero at {path2str([str(e) for e in schema_path])}"
                         )
-            if "properties" in node and isinstance(node["properties"], dict):
-                for k, v in node["properties"].items():
-                    walk(v, schema_path + [("properties", k)])
-            if "items" in node:
-                walk(node["items"], schema_path + [("items",)])
-            if "prefixItems" in node and isinstance(node["prefixItems"], list):
-                for i, sub in enumerate(node["prefixItems"]):
-                    walk(sub, schema_path + [("prefixItems", i)])
+            for child, child_path in ObjectAligner._iter_schema_children(node, schema_path):
+                walk(child, child_path)
 
         walk(schema, [])
 
@@ -642,14 +524,8 @@ class ObjectAligner:
                 return
 
             # Recurse
-            if "properties" in node and isinstance(node["properties"], dict):
-                for k, v in node["properties"].items():
-                    walk(v, schema_path + [("properties", k)])
-            if "items" in node:
-                walk(node["items"], schema_path + [("items",)])
-            if "prefixItems" in node and isinstance(node["prefixItems"], list):
-                for i, sub in enumerate(node["prefixItems"]):
-                    walk(sub, schema_path + [("prefixItems", i)])
+            for child, child_path in self._iter_schema_children(node, schema_path):
+                walk(child, child_path)
 
         walk(schema, [])
 
@@ -1417,8 +1293,6 @@ class ObjectAligner:
             jsonschema.ValidationError: If `gold` fails validation
                 (validation enabled).
         """
-        from object_aligner.attribution import AttributionResult, tree_walk_attribution
-
         if not skip_validation:
             self._validator.validate(gold)
             try:
@@ -1460,8 +1334,6 @@ class ObjectAligner:
         Returns:
             `AttributionResult` — same shape as `attribute()`.
         """
-        from object_aligner.attribution import tree_walk_attribution
-
         return tree_walk_attribution(
             match_tree,
             self.schema,
@@ -1502,8 +1374,6 @@ class ObjectAligner:
             jsonschema.ValidationError: If `gold` fails validation
                 (validation enabled).
         """
-        from object_aligner.repair import RepairResult, generate_repairs
-
         if not skip_validation:
             self._validator.validate(gold)
             try:
@@ -1557,8 +1427,6 @@ class ObjectAligner:
         Returns:
             `RepairResult` — same shape as `repair()`.
         """
-        from object_aligner.repair import generate_repairs
-
         return generate_repairs(
             match_tree,
             self.schema,
@@ -1620,8 +1488,6 @@ class ObjectAligner:
             jsonschema.ValidationError: If `gold` fails validation
                 (validation enabled).
         """
-        from object_aligner.feedback import FeedbackResult, render_feedback
-
         if not skip_validation:
             self._validator.validate(gold)
             try:
@@ -1695,8 +1561,6 @@ class ObjectAligner:
         Returns:
             `FeedbackResult` — same shape as `feedback()`.
         """
-        from object_aligner.feedback import render_feedback
-
         repair_result = self.repair_from_match(
             match_tree, gold, pred, mappings,
             granularity=granularity,
@@ -1716,18 +1580,88 @@ class ObjectAligner:
             ),
         )
 
+    def describe(
+        self,
+        gold,
+        pred,
+        *,
+        style=None,
+        skip_validation=False,
+    ):
+        """Render a plain-English description of `(gold, pred)`.
+
+        Aligns once internally and walks the match tree; never invokes an
+        LLM. The output is deterministic and template-driven. See
+        [`docs/describe.md`](../describe.md) for examples.
+
+        Args:
+            gold: Gold (reference) object.
+            pred: Predicted object.
+            style: Override the constructor `description_style`. `None`
+                defers to the instance default.
+            skip_validation: If `True`, skip JSON Schema validation.
+
+        Returns:
+            `DescriptionResult` whose `text` is the rendered indented
+            prose (or `""` in `"json"` style) and `entries` is a
+            traversal-ordered list of `DescriptionEntry`. On validation
+            failure of `pred`, returns a degenerate result with
+            `score=0.0` and a rendered validation-error message as
+            `text`.
+
+        Raises:
+            jsonschema.ValidationError: If `gold` fails validation
+                (validation enabled).
+        """
+        if not skip_validation:
+            self._validator.validate(gold)
+            try:
+                self._validator.validate(pred)
+            except ValidationError as e:
+                return render_description_validation_error(
+                    e, self.description_templates,
+                )
+
+        match_tree, _ctx = self._align_with_ctx(gold, pred, skip_validation=True)
+        return render_description(
+            match_tree,
+            style=style or self.description_style_default,
+            templates=self.description_templates,
+        )
+
+    def describe_from_match(
+        self,
+        match_tree,
+        *,
+        style=None,
+    ):
+        """Render a description from an already-computed match tree.
+
+        Args:
+            match_tree: A match tree returned by `align()`.
+            style: See `describe()`.
+
+        Returns:
+            `DescriptionResult` — same shape as `describe()`.
+        """
+        return render_description(
+            match_tree,
+            style=style or self.description_style_default,
+            templates=self.description_templates,
+        )
+
     def metric(
         self,
         gold,
         pred,
         debug=False,
-        generate_reasoning=None,
+        generate_description=None,
         generate_feedback=None,
     ):
         """Score `pred` against `gold` and return a result dict.
 
         Always validates `gold`. If `pred` fails validation, returns
-        `{"score": 0.0}` (with a `"reasoning"` / `"feedback"` describing
+        `{"score": 0.0}` (with a `"description"` / `"feedback"` describing
         the error when those are enabled). Safe to call concurrently on a
         single instance.
 
@@ -1738,10 +1672,13 @@ class ObjectAligner:
             debug: When `True`, the returned dict also contains a
                 `"debug"` key with a structured alignment tree built out
                 of basic Python container/scalar types.
-            generate_reasoning: Per-call override of the constructor
-                default. `None` defers to the instance setting; `True` /
-                `False` flips it for this call. See
-                [`docs/reasoning.md`](../reasoning.md).
+            generate_description: Per-call override of the constructor
+                default. `None` defers to the instance setting. Accepts
+                `False` / `True` (renders description as a string under
+                `"description"`) or `"full"` (a structured dict — the
+                same shape as `DescriptionResult.to_dict()`). Any other
+                value raises `ValueError`. See
+                [`docs/describe.md`](../describe.md).
             generate_feedback: Per-call override of the constructor
                 default. `None` uses the instance setting. Accepts
                 `False` / `True` (renders feedback as a string under
@@ -1752,21 +1689,27 @@ class ObjectAligner:
 
         Returns:
             Dict with required key `"score"` (Python `float` in `[0, 1]`)
-            and optional keys `"reasoning"` (str), `"feedback"`
-            (str or dict), and `"debug"` (dict) based on the flags.
+            and optional keys `"description"` (str or dict),
+            `"feedback"` (str or dict), and `"debug"` (dict) based on
+            the flags.
 
         Raises:
             jsonschema.ValidationError: If `gold` fails validation.
-            ValueError: If `generate_feedback` is not `None` / `False` /
-                `True` / `"full"`.
+            ValueError: If `generate_description` or `generate_feedback`
+                is not `None` / `False` / `True` / `"full"`.
         """
         self._validator.validate(gold)
 
-        should_generate_reasoning = (
-            self.generate_reasoning_default
-            if generate_reasoning is None
-            else generate_reasoning
+        description_mode = (
+            self.generate_description_default
+            if generate_description is None
+            else generate_description
         )
+        if description_mode not in (False, True, "full"):
+            raise ValueError(
+                "generate_description must be None, False, True, or 'full'; "
+                f"got {generate_description!r}"
+            )
         feedback_mode = (
             self.generate_feedback_default
             if generate_feedback is None
@@ -1782,9 +1725,12 @@ class ObjectAligner:
             self._validator.validate(pred)
         except ValidationError as e:
             result = {"score": 0.0}
-            if should_generate_reasoning:
-                result["reasoning"] = (
-                    self._reasoning_renderer.render_validation_error(e)
+            if description_mode:
+                dr = render_description_validation_error(
+                    e, self.description_templates,
+                )
+                result["description"] = (
+                    dr.to_dict() if description_mode == "full" else dr.text
                 )
             if feedback_mode:
                 error_text = self.feedback_templates[
@@ -1806,8 +1752,15 @@ class ObjectAligner:
 
         match_tree, ctx = self._align_with_ctx(gold, pred, skip_validation=True)
         result = {"score": float(match_tree.score)}
-        if should_generate_reasoning:
-            result["reasoning"] = self._reasoning_renderer.render(match_tree)
+        if description_mode:
+            dr = render_description(
+                match_tree,
+                style=self.description_style_default,
+                templates=self.description_templates,
+            )
+            result["description"] = (
+                dr.to_dict() if description_mode == "full" else dr.text
+            )
         if feedback_mode:
             fb = self.feedback_from_match(
                 match_tree, gold, pred, ctx.current_mappings,

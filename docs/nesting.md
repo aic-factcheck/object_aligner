@@ -39,10 +39,10 @@ schema = {
     "order": "align"  # order doesn't matter — find best pairing
 }
 
-aligner = ObjectAligner(schema, generate_reasoning=True)
+aligner = ObjectAligner(schema, generate_description=True)
 result = aligner.metric(gold, pred)
 print(f"Score: {result['score']:.2f}")
-print(result["reasoning"])
+print(result["description"])
 ```
 
 The Hungarian algorithm pairs `{"name": "Alice"}` with `{"name": "Alice"}` and `{"name": "Bob"}` with `{"name": "Bobby"}`, then recursively scores each pair.
@@ -120,10 +120,10 @@ schema = {
     "valueImportance": 1.0
 }
 
-aligner = ObjectAligner(schema, generate_reasoning=True)
+aligner = ObjectAligner(schema, generate_description=True)
 result = aligner.metric(gold, pred)
 print(f"Score: {result['score']:.2f}")
-print(result["reasoning"])
+print(result["description"])
 ```
 
 Key design decisions in this schema:
@@ -168,10 +168,10 @@ schema = {
     "order": "fixed"
 }
 
-aligner = ObjectAligner(schema, generate_reasoning=True)
+aligner = ObjectAligner(schema, generate_description=True)
 result = aligner.metric(gold, pred)
 print(f"Score: {result['score']:.2f}")
-print(result["reasoning"])
+print(result["description"])
 ```
 
 This example demonstrates how `prefixItems` + `items` combine in nested arrays. The dish name and quantity (prefix) dominate the score, while missing notes ("no onions") have a smaller impact.
@@ -254,10 +254,10 @@ schema = {
     "order": "align"
 }
 
-aligner = ObjectAligner(schema, generate_reasoning=True)
+aligner = ObjectAligner(schema, generate_description=True)
 result = aligner.metric(gold, pred)
 print(f"Score: {result['score']:.2f}")
-print(result["reasoning"])
+print(result["description"])
 ```
 
 Design highlights:

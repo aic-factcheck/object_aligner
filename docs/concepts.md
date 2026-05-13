@@ -62,23 +62,23 @@ dct = MatchDict(score=0.8, children={
 
 ### ObjectAligner Class
 
-The main entry point. You create it with a schema and optional reasoning configuration:
+The main entry point. You create it with a schema and optional description configuration:
 
 ```python
 from object_aligner import ObjectAligner
 
 aligner = ObjectAligner(schema)
-aligner_with_reasoning = ObjectAligner(schema, generate_reasoning=True)
+aligner_with_description = ObjectAligner(schema, generate_description=True)
 ```
 
-`reasoning_templates` (and `feedback_templates`) let you override selected built-in template strings. The packaged defaults ship as TOML data under `src/object_aligner/templates/` (`reasoning.toml`, `feedback.toml`, `feedback.compact.toml`); the public helper `load_templates_from_toml(path)` reads user-authored override files in the same format.
+`description_templates` (and `feedback_templates`) let you override selected built-in template strings. The packaged defaults ship as TOML data under `src/object_aligner/templates/` (`describe.toml`, `feedback.toml`, `feedback.compact.toml`); the public helper `load_templates_from_toml(path)` reads user-authored override files in the same format.
 
 It provides two primary methods:
 
 - **`align(gold, pred, skip_validation=False)`** — Returns the match object (`MatchItem`, `MatchList`, or `MatchDict`) representing the full alignment tree.
-- **`metric(gold, pred, debug=False, generate_reasoning=None, generate_feedback=None)`** — Validates both objects against the schema, runs alignment, and returns `{"score": ...}` by default. It adds `"reasoning"` when reasoning is enabled, a top-K prescriptive `"feedback"` string when `generate_feedback=True` (or a structured dict when `generate_feedback="full"`), and a structured `"debug"` alignment tree when `debug=True`.
+- **`metric(gold, pred, debug=False, generate_description=None, generate_feedback=None)`** — Validates both objects against the schema, runs alignment, and returns `{"score": ...}` by default. It adds `"description"` when description is enabled (a string, or a structured dict when `generate_description="full"`), a top-K prescriptive `"feedback"` string when `generate_feedback=True` (or a structured dict when `generate_feedback="full"`), and a structured `"debug"` alignment tree when `debug=True`.
 
-For post-alignment analysis, `ObjectAligner` exposes three sibling outputs all derived from the same match tree: [`attribute()`](attribution.md) decomposes the deficit into per-path contributions, [`repair()`](repair.md) emits scored RFC 6902-flavored repair ops, and [`feedback()`](feedback.md) renders an optimizer-ready prescriptive feedback string on top of them.
+For post-alignment analysis, `ObjectAligner` exposes four sibling outputs all derived from the same match tree: [`describe()`](describe.md) walks the tree into human-readable prose, [`attribute()`](attribution.md) decomposes the deficit into per-path contributions, [`repair()`](repair.md) emits scored RFC 6902-flavored repair ops, and [`feedback()`](feedback.md) renders an optimizer-ready prescriptive feedback string on top of them.
 
 ### Migration note
 

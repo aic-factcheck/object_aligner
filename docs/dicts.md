@@ -28,7 +28,7 @@ schema = {
     },
     "keyScore": "exact"
 }
-aligner = ObjectAligner(schema, generate_reasoning=True)
+aligner = ObjectAligner(schema, generate_description=True)
 
 gold = {"name": "Alice", "age": 30}
 pred = {"name": "Alicia", "age": 29}
@@ -58,9 +58,9 @@ schema = {
     "keyImportance": 1.0,
     "valueImportance": 1.0
 }
-aligner = ObjectAligner(schema, generate_reasoning=True)
+aligner = ObjectAligner(schema, generate_description=True)
 result = aligner.metric(gold, pred)
-print(result["reasoning"])
+print(result["description"])
 ```
 
 Output:
@@ -145,9 +145,9 @@ schema = {
     "keyImportance": 0.0,     # ignore key quality
     "valueImportance": 1.0    # only care about values
 }
-aligner = ObjectAligner(schema, generate_reasoning=True)
+aligner = ObjectAligner(schema, generate_description=True)
 result = aligner.metric(gold, pred)
-print(result["reasoning"])
+print(result["description"])
 ```
 
 Output:

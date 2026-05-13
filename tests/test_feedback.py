@@ -548,16 +548,16 @@ def test_metric_invalid_generate_feedback_value_raises():
         aligner.metric(gold, pred, generate_feedback="garbage")
 
 
-def test_metric_reasoning_and_feedback_both_present():
+def test_metric_description_and_feedback_both_present():
     aligner = _movie_aligner()
     gold, pred = _movie_gold_pred()
     r = aligner.metric(
-        gold, pred, generate_reasoning=True, generate_feedback=True,
+        gold, pred, generate_description=True, generate_feedback=True,
     )
-    assert isinstance(r["reasoning"], str)
+    assert isinstance(r["description"], str)
     assert isinstance(r["feedback"], str)
     # Distinct outputs.
-    assert r["reasoning"] != r["feedback"]
+    assert r["description"] != r["feedback"]
 
 
 def test_metric_validation_failure_with_feedback_renders_error_text():
@@ -868,6 +868,20 @@ def test_to_dict_round_trips_basic_types():
 
 def test_default_feedback_templates_has_18_keys():
     assert len(DEFAULT_FEEDBACK_TEMPLATES) == 18
+
+
+def test_feedback_invalid_pred_renders_validation_error_text():
+    schema = {
+        "type": "object",
+        "properties": {"name": {"type": "string"}, "age": {"type": "integer"}},
+        "required": ["name", "age"],
+        "keyScore": "exact",
+    }
+    aligner = ObjectAligner(schema)
+    result = aligner.feedback({"name": "A", "age": 1}, {"name": "A"})
+    assert result.score == 0.0
+    assert result.entries == ()
+    assert "failed schema validation" in result.text
 
 
 def test_feedback_entry_is_frozen():

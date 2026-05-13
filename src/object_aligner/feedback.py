@@ -27,7 +27,7 @@ from dataclasses import dataclass, field
 from typing import Any, Callable
 
 from object_aligner._templates import _load_packaged_template, validate_templates
-from object_aligner.repair import RepairOp, RepairResult
+from object_aligner.repair import RepairOp, RepairResult, _filter_paired_ops
 
 # -----------------------------------------------------------------------------
 # Public exports
@@ -364,21 +364,7 @@ def _select_top_k(
             f"min_score_delta must be >= 0, got {min_score_delta!r}"
         )
 
-    # Decide which key-rename pairs pass min_score_delta (the add carries
-    # the gain; the remove carries 0).
-    pair_pass: dict[str, bool] = {}
-    for op in ops:
-        if op.pair_id and op.kind == "key_rename_add":
-            pair_pass[op.pair_id] = op.score_delta >= min_score_delta
-
-    filtered: list = []
-    for op in ops:
-        if op.pair_id:
-            if pair_pass.get(op.pair_id, False):
-                filtered.append(op)
-            continue
-        if op.score_delta >= min_score_delta:
-            filtered.append(op)
+    filtered = _filter_paired_ops(ops, min_score_delta)
 
     if top_k is None:
         selected = filtered
@@ -731,51 +717,3 @@ def _render_full_text(
                 top_kinds=_compute_top_kinds(entries),
             )
     return out
-
-
-# -----------------------------------------------------------------------------
-# Renderer-class wrapper (used by ObjectAligner)
-# -----------------------------------------------------------------------------
-
-class _FeedbackRenderer:
-    """Bundles aligner-instance defaults (templates, value_formatter,
-    dominant_fraction_threshold) so per-call code on ``ObjectAligner`` only
-    needs to pass per-call overrides."""
-
-    def __init__(
-        self,
-        templates: dict,
-        value_formatter: Callable[[Any], str] | None,
-        dominant_fraction_threshold: float,
-    ):
-        self.templates = templates
-        self.value_formatter = value_formatter
-        self.dominant_fraction_threshold = dominant_fraction_threshold
-
-    def render(
-        self,
-        repair_result: RepairResult,
-        *,
-        top_k: int | None = 5,
-        min_score_delta: float = 0.0,
-        style: str = "gepa",
-        include_synthesis_line: bool = True,
-        include_metadata: bool = False,
-        dominant_fraction_threshold: float | None = None,
-        value_formatter: Callable[[Any], str] | None = None,
-    ) -> FeedbackResult:
-        return render_feedback(
-            repair_result,
-            top_k=top_k,
-            min_score_delta=min_score_delta,
-            style=style,
-            include_synthesis_line=include_synthesis_line,
-            include_metadata=include_metadata,
-            templates=self.templates,
-            value_formatter=value_formatter or self.value_formatter,
-            dominant_fraction_threshold=(
-                self.dominant_fraction_threshold
-                if dominant_fraction_threshold is None
-                else dominant_fraction_threshold
-            ),
-        )

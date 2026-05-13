@@ -1,6 +1,6 @@
 # object-aligner
 
-Python library for aligning structured objects (`dict`, `list`, primitives) and scoring similarity in `[0, 1]`, with optional human-readable reasoning.
+Python library for aligning structured objects (`dict`, `list`, primitives) and scoring similarity in `[0, 1]`, with optional human-readable descriptions.
 
 ## History
 
@@ -29,9 +29,9 @@ aligner = ObjectAligner(schema)
 result = aligner.metric("hello", "hallo")
 print(result)  # {"score": ...}
 
-result_with_reasoning = aligner.metric("hello", "hallo", generate_reasoning=True)
-print(result_with_reasoning["score"])
-print(result_with_reasoning["reasoning"])
+result_with_description = aligner.metric("hello", "hallo", generate_description=True)
+print(result_with_description["score"])
+print(result_with_description["description"])
 ```
 
 Built-in string metrics include `exact`, `jaro`, `jaro_winkler`, `levenshtein`, `damerau_levenshtein`, `osa`, `indel`, and `lcsseq`.
@@ -76,7 +76,7 @@ For integer schemas, custom metrics first look in the `integer` registry and the
 
 ## API note
 
-`ObjectAligner` takes the schema plus optional keyword arguments such as `custom_metrics` and `generate_reasoning`:
+`ObjectAligner` takes the schema plus optional keyword arguments such as `custom_metrics` and `generate_description`:
 
 ```python
 aligner = ObjectAligner(schema)

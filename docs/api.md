@@ -21,7 +21,7 @@ chapters use to deep-link into this page.
 <!-- anchor: objectaligner -->
 
 ```python
-ObjectAligner(schema, *, custom_metrics=None, generate_reasoning=False, reasoning_templates=None, generate_feedback=False, feedback_templates=None, feedback_style='gepa', dominant_fraction_threshold=0.6, warn_on_ambiguous_mapping=False)
+ObjectAligner(schema, *, custom_metrics=None, generate_description=False, description_templates=None, description_style='default', generate_feedback=False, feedback_templates=None, feedback_style='gepa', dominant_fraction_threshold=0.6, warn_on_ambiguous_mapping=False)
 ```
 
 Aligns a gold object against a predicted object under a schema.
@@ -43,17 +43,18 @@ See [`docs/concepts.md`](../concepts.md) for the architectural tour.
 
 - **`schema`** — JSON-Schema-inspired dict describing the structure and scoring of the objects to be aligned. See [`docs/schema_reference.md`](../schema_reference.md) for the full list of supported keywords.
 - **`custom_metrics`** — Optional mapping from schema type (`"string"` / `"number"` / `"integer"`) to a mapping of `name -> callable(gold, pred) -> float in [0, 1]`. Integer schemas use built-in number metrics and fall back to custom `number` metrics unless overridden by a custom `integer` metric with the same name. Boolean scoring is exact-only and cannot be customized.
-- **`generate_reasoning`** — Default for the `generate_reasoning` parameter of `metric()`. When `True`, `metric()` returns include a `"reasoning"` string key. See [`docs/reasoning.md`](../reasoning.md).
-- **`reasoning_templates`** — Optional partial override of the packaged reasoning templates. Unknown keys or unknown placeholders raise `ValueError`.
+- **`generate_description`** — Default for the `generate_description` parameter of `metric()`. When truthy, `metric()` returns include a `"description"` key. Accepts `True` / `False` / `"full"`; see [`docs/describe.md`](../describe.md).
+- **`description_templates`** — Optional partial override of the packaged description templates. Unknown keys or unknown placeholders raise `ValueError`.
+- **`description_style`** — One of the registered description styles (default `"default"`). Controls whether the renderer produces prose (`"default"`) or empty `.text` plus populated `.entries` (`"json"`).
 - **`generate_feedback`** — Default for the `generate_feedback` parameter of `metric()`. When truthy, `metric()` returns include a `"feedback"` key. Accepts `True` / `False` / `"full"`; see [`docs/feedback.md`](../feedback.md).
-- **`feedback_templates`** — Optional partial override of the packaged feedback templates. Validated against the same allowlist machinery as `reasoning_templates`.
+- **`feedback_templates`** — Optional partial override of the packaged feedback templates. Validated against the same allowlist machinery as `description_templates`.
 - **`feedback_style`** — One of the registered feedback styles (default `"gepa"`). Controls phrasing and synthesis-line shape.
 - **`dominant_fraction_threshold`** — Fraction of the deficit that one op kind must own for the feedback synthesis line to switch between the "single dominant" and "mixed" phrasings. Defaults to `0.60`.
 - **`warn_on_ambiguous_mapping`** — If `True`, emit a `UserWarning` whenever the Hungarian-derived id mapping for an `idScope` is non-unique because of tied costs. Off by default.
 
 **Raises**
 
-- **`ValueError`** — If `custom_metrics` contains an unsupported schema type, collides with a built-in metric name, or `feedback_style` is not a registered style.
+- **`ValueError`** — If `custom_metrics` contains an unsupported schema type, collides with a built-in metric name, `feedback_style` is not a registered style, or `description_style` is not a registered style.
 - **`jsonschema.SchemaError`** — If `schema` itself is not a valid JSON Schema.
 
 #### `ObjectAligner.align()`
@@ -86,13 +87,13 @@ Builds a per-call context, so concurrent calls on the same
 <!-- anchor: objectalignermetric -->
 
 ```python
-ObjectAligner.metric(gold, pred, debug=False, generate_reasoning=None, generate_feedback=None)
+ObjectAligner.metric(gold, pred, debug=False, generate_description=None, generate_feedback=None)
 ```
 
 Score `pred` against `gold` and return a result dict.
 
 Always validates `gold`. If `pred` fails validation, returns
-`{"score": 0.0}` (with a `"reasoning"` / `"feedback"` describing
+`{"score": 0.0}` (with a `"description"` / `"feedback"` describing
 the error when those are enabled). Safe to call concurrently on a
 single instance.
 
@@ -101,15 +102,15 @@ single instance.
 - **`gold`** — Gold (reference) object. Must pass schema validation.
 - **`pred`** — Predicted object. Validation failure here is non-fatal: a score of `0.0` is returned.
 - **`debug`** — When `True`, the returned dict also contains a `"debug"` key with a structured alignment tree built out of basic Python container/scalar types.
-- **`generate_reasoning`** — Per-call override of the constructor default. `None` defers to the instance setting; `True` / `False` flips it for this call. See [`docs/reasoning.md`](../reasoning.md).
+- **`generate_description`** — Per-call override of the constructor default. `None` defers to the instance setting. Accepts `False` / `True` (renders description as a string under `"description"`) or `"full"` (a structured dict — the same shape as `DescriptionResult.to_dict()`). Any other value raises `ValueError`. See [`docs/describe.md`](../describe.md).
 - **`generate_feedback`** — Per-call override of the constructor default. `None` uses the instance setting. Accepts `False` / `True` (renders feedback as a string under `"feedback"`) or `"full"` (a structured dict — the same shape as `FeedbackResult.to_dict()`). Any other value raises `ValueError`. See [`docs/feedback.md`](../feedback.md).
 
-**Returns** — Dict with required key `"score"` (Python `float` in `[0, 1]`) and optional keys `"reasoning"` (str), `"feedback"` (str or dict), and `"debug"` (dict) based on the flags.
+**Returns** — Dict with required key `"score"` (Python `float` in `[0, 1]`) and optional keys `"description"` (str or dict), `"feedback"` (str or dict), and `"debug"` (dict) based on the flags.
 
 **Raises**
 
 - **`jsonschema.ValidationError`** — If `gold` fails validation.
-- **`ValueError`** — If `generate_feedback` is not `None` / `False` / `True` / `"full"`.
+- **`ValueError`** — If `generate_description` or `generate_feedback` is not `None` / `False` / `True` / `"full"`.
 
 #### `ObjectAligner.attribute()`
 <!-- anchor: objectalignerattribute -->
@@ -204,6 +205,48 @@ Generate repair ops from an already-computed match tree.
 - **`min_contribution`** — See `repair()`.
 
 **Returns** — `RepairResult` — same shape as `repair()`.
+
+#### `ObjectAligner.describe()`
+<!-- anchor: objectalignerdescribe -->
+
+```python
+ObjectAligner.describe(gold, pred, *, style=None, skip_validation=False)
+```
+
+Render a plain-English description of `(gold, pred)`.
+
+Aligns once internally and walks the match tree; never invokes an
+LLM. The output is deterministic and template-driven. See
+[`docs/describe.md`](../describe.md) for examples.
+
+**Parameters**
+
+- **`gold`** — Gold (reference) object.
+- **`pred`** — Predicted object.
+- **`style`** — Override the constructor `description_style`. `None` defers to the instance default.
+- **`skip_validation`** — If `True`, skip JSON Schema validation.
+
+**Returns** — `DescriptionResult` whose `text` is the rendered indented prose (or `""` in `"json"` style) and `entries` is a traversal-ordered list of `DescriptionEntry`. On validation failure of `pred`, returns a degenerate result with `score=0.0` and a rendered validation-error message as `text`.
+
+**Raises**
+
+- **`jsonschema.ValidationError`** — If `gold` fails validation (validation enabled).
+
+#### `ObjectAligner.describe_from_match()`
+<!-- anchor: objectalignerdescribe_from_match -->
+
+```python
+ObjectAligner.describe_from_match(match_tree, *, style=None)
+```
+
+Render a description from an already-computed match tree.
+
+**Parameters**
+
+- **`match_tree`** — A match tree returned by `align()`.
+- **`style`** — See `describe()`.
+
+**Returns** — `DescriptionResult` — same shape as `describe()`.
 
 #### `ObjectAligner.feedback()`
 <!-- anchor: objectalignerfeedback -->
@@ -354,7 +397,7 @@ or bad value types surface here.
 
 - **`path`** — Path-like pointing to a TOML file containing template overrides.
 
-**Returns** — A flat `{template_key: template_string}` dict suitable for passing as `feedback_templates=` or `reasoning_templates=` to `ObjectAligner(...)`.
+**Returns** — A flat `{template_key: template_string}` dict suitable for passing as `feedback_templates=` or `description_templates=` to `ObjectAligner(...)`.
 
 **Raises**
 
@@ -524,6 +567,86 @@ Indexable: `result[0]` is the highest-`score_delta` op.
 | `total_delta` | `float` | 0.0 | Sum of `score_delta` across `ops`. |
 | `residual` | `float` | 0.0 | `total_delta - (1 - score)`. Non-zero indicates the ranked ops do not fully close the deficit under the approximate flavor. |
 | `notes` | `tuple` | tuple() → () | Free-form strings flagging when the patch's semantics interact with re-pairing (e.g., an `order: "align"` list present in the schema). |
+
+---
+
+## Description
+
+### `render_description`
+<!-- anchor: render_description -->
+
+```python
+render_description(match_tree, *, style: 'str' = 'default', templates: 'dict | None' = None) -> 'DescriptionResult'
+```
+
+Render a match tree as a deterministic English description.
+
+See [`docs/describe.md`](../describe.md) for the full design and
+examples.
+
+**Parameters**
+
+- **`match_tree`** — A match tree returned by ``ObjectAligner.align()``.
+- **`style`** — ``"default"`` (multi-line indented prose walk of the match tree) or ``"json"`` (empty ``.text``, structured ``.entries`` only).
+- **`templates`** — User template overrides (full dict, partial dict, or ``None`` for defaults).
+
+**Returns** — ``DescriptionResult`` whose ``text`` is the fully rendered indented description (or ``""`` in ``"json"`` style).
+
+**Raises**
+
+- **`ValueError`** — If ``style`` is not a registered style.
+
+### `DescriptionEntry`
+<!-- anchor: descriptionentry -->
+
+```python
+DescriptionEntry(path: 'str', depth: 'int', match_kind: 'str', outcome: 'str', score: 'float', text: 'str') -> None
+```
+
+One visited match-tree node plus its rendered prose line.
+
+Emitted in match-tree traversal order — *not* ranked by score. Every
+node visited produces an entry, including matched ones (this is what
+differentiates ``describe`` from ``feedback``).
+
+**Fields**
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `path` | `str` | *(required)* | Indicative JSON Pointer at this node. For ``order: "align"`` lists the path stops at the list itself (children share the list path) because Hungarian-matched indices are not stable; for fixed/prefix lists the index is included. |
+| `depth` | `int` | *(required)* | 0-indexed nesting depth (matches the visual indent depth). |
+| `match_kind` | `str` | *(required)* | One of ``"item"``, ``"list"``, ``"dict"``, ``"key"``, ``"ref"``, ``"id"``. |
+| `outcome` | `str` | *(required)* | One of ``"match"``, ``"mismatch"``, ``"excess"``, ``"missing"``. |
+| `score` | `float` | *(required)* | Similarity in ``[0, 1]`` at this node. |
+| `text` | `str` | *(required)* | Rendered template body for this node. May be ``""`` for silenced templates (default ``describe.id.match`` / ``describe.id.mismatch`` are empty). |
+
+### `DescriptionResult`
+<!-- anchor: descriptionresult -->
+
+```python
+DescriptionResult(score: 'float', text: 'str', entries: 'tuple' = <factory>, style: 'str' = 'default') -> None
+```
+
+Result of a single `render_description()` call.
+
+``str(result)`` returns ``result.text``. Iterable: ``for entry in
+result`` yields ``DescriptionEntry``s in match-tree traversal order.
+
+**Fields**
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `score` | `float` | *(required)* | Overall similarity in ``[0, 1]``. |
+| `text` | `str` | *(required)* | Fully rendered description string (empty in ``"json"`` style). |
+| `entries` | `tuple` | tuple() → () | Structured backing entries, in traversal order. |
+| `style` | `str` | 'default' | The style name used to render (``"default"`` or ``"json"``). |
+
+### `DEFAULT_DESCRIPTION_TEMPLATES` (constant)
+<!-- anchor: default_description_templates-constant -->
+
+Type: `dict`. Dict with 18 keys.
+
+Default template strings live under `src/object_aligner/templates/`. Import this name and pass it (or an override dict) into `ObjectAligner(...)` to customize.
 
 ---
 

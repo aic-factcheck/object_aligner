@@ -11,7 +11,7 @@ prompt optimizer.
 
 The feedback is **deterministic and template-based — there is no LLM
 involved**. That is the design constraint: the optimization-relevant
-reasoning is already performed by `align()` + `repair()`, and the
+analysis is already performed by `align()` + `repair()`, and the
 feedback layer is a deterministic projection of that work onto a text
 surface.
 
@@ -392,7 +392,7 @@ wasn't translated in this example).
 For large or translated template sets, keep the strings in a TOML file
 rather than inlining a dict. The shipped helper
 `load_templates_from_toml(path)` returns a dict suitable for passing
-directly as `feedback_templates=` or `reasoning_templates=`:
+directly as `feedback_templates=` or `description_templates=`:
 
 ```toml
 # my_feedback_cs.toml
@@ -431,7 +431,7 @@ runs when `ObjectAligner(...)` consumes the loaded dict — bad files
 fail at construction, not at first render.
 
 The packaged defaults themselves live as TOML data under
-`src/object_aligner/templates/` (`reasoning.toml`, `feedback.toml`,
+`src/object_aligner/templates/` (`describe.toml`, `feedback.toml`,
 `feedback.compact.toml`); use those as the canonical reference when
 authoring overrides.
 
@@ -502,7 +502,7 @@ values are.
 
 Reuses `aligner`, `gold`, `pred` from the [shared setup](#shared-setup-for-the-examples).
 If you've already computed a match tree (e.g. for attribution or
-reasoning), reuse it:
+describing), reuse it:
 
 ```python
 match_tree = aligner.align(gold, pred)
@@ -662,7 +662,7 @@ point an optimizer will truncate it.
 
 - [`repair.md`](repair.md) — the structured op list this feedback rides on.
 - [`attribution.md`](attribution.md) — per-path deficit decomposition.
-- [`reasoning.md`](reasoning.md) — narrative walk of the match tree.
+- [`describe.md`](describe.md) — narrative walk of the match tree.
 - [`metric.md`](metric.md) — the surrounding evaluation call.
 - [`api.md`](api.md) — generated API reference.
 

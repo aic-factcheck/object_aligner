@@ -671,3 +671,17 @@ def test_nested_movie_schema_invariant_and_round_trip():
     assert aligner.metric(gold, patched)["score"] == pytest.approx(1.0, abs=EPS_LOOSE)
     # Original unmutated.
     assert pred["year"] == 2000
+
+
+def test_repair_invalid_pred_returns_empty_with_sentinel_residual():
+    schema = {
+        "type": "object",
+        "properties": {"name": {"type": "string"}, "age": {"type": "integer"}},
+        "required": ["name", "age"],
+        "keyScore": "exact",
+    }
+    aligner = ObjectAligner(schema)
+    result = aligner.repair({"name": "A", "age": 1}, {"name": "A"})
+    assert result.score == 0.0
+    assert result.ops == ()
+    assert result.residual == -1.0

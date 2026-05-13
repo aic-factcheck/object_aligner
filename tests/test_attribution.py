@@ -807,3 +807,17 @@ def test_tree_walk_attribution_callable_directly():
     result = tree_walk_attribution(tree, schema)
     assert result.score == pytest.approx(tree.score, abs=EPS_TIGHT)
     assert len(result.entries) == 1
+
+
+def test_attribute_invalid_pred_returns_empty_with_sentinel_residual():
+    schema = {
+        "type": "object",
+        "properties": {"name": {"type": "string"}, "age": {"type": "integer"}},
+        "required": ["name", "age"],
+        "keyScore": "exact",
+    }
+    aligner = ObjectAligner(schema)
+    result = aligner.attribute({"name": "A", "age": 1}, {"name": "A"})
+    assert result.score == 0.0
+    assert result.entries == ()
+    assert result.residual == -1.0

@@ -1,37 +1,37 @@
-"""Frozen pre-refactor template snapshots.
+"""Frozen template snapshots.
 
-This module is the golden reference for the TOML externalization refactor:
-the three dicts below were copy-pasted *verbatim* from the pre-refactor
-Python sources (``object_aligner.py`` and ``feedback.py``) before any
-edits were made. The equivalence tests in ``tests/test_templates.py``
-assert that the post-refactor TOML-loaded dicts are byte-identical to
-these snapshots, catching any accidental drift during the refactor.
+This module is the byte-for-byte reference for the live default-template
+dicts. The equivalence tests in ``tests/test_templates.py`` assert that
+the TOML-loaded defaults are byte-identical to these snapshots, catching
+any accidental drift.
 
 DO NOT modify this file when changing the live templates — if a template
 genuinely needs to change, update *both* the live TOML file and this
 snapshot in the same commit, on purpose.
 """
 
-# Captured from src/object_aligner/object_aligner.py:75-96
-LEGACY_REASONING = {
-    "metric.perfect": "The predicted output perfectly matches the gold.",
-    "metric.imperfect_intro": "The predicted output scores overall {score_pct}, let us align the predicted output to the gold and analyze the differences:\n",
-    "item.match": '{indent}The predicted value "{pred}" exactly matches the gold.\n',
-    "item.mismatch": '{indent}The predicted value "{pred}" does not match the gold "{gold}" (score={score_pct}).\n',
-    "ref.match": '{indent}The predicted reference "{pred}" matches the gold reference "{gold}" under the inferred id mapping.\n',
-    "ref.mismatch": '{indent}The predicted reference "{pred}" does not match the gold reference "{gold}" under the inferred id mapping (score={score_pct}).\n',
-    "id.match": "",
-    "id.mismatch": "",
-    "list.match": "{indent}The predicted list perfectly matches the gold one:\n",
-    "list.mismatch": "{indent}The predicted list scores {score_pct}:\n",
-    "list.excess": '{indent}The predicted list item "{pred}" is excessive, it was not in the gold.\n',
-    "list.missing": '{indent}The predicted output misses the "{gold}" list item from the gold.\n',
-    "dict.match": "{indent}The predicted dictionary perfectly matches the gold one:\n",
-    "dict.mismatch": "{indent}The predicted dictionary scores {score_pct}:\n",
-    "dict.key.match": '{indent}KEY = The predicted key "{pred}" exactly matches the gold.\n',
-    "dict.key.mismatch": '{indent}KEY = The predicted key "{pred}" does not match the gold "{gold}" (score={score_pct}).\n',
-    "dict.value.prefix": "{indent}VALUE = ",
-    "validation.error": 'JSON Schema validation failed for path="{path}". Error message: {message}.',
+# Captured from src/object_aligner/templates/describe.toml at the time of
+# the describe rename — every key is byte-identical to the legacy reasoning
+# defaults modulo the "describe." prefix and the validation_error key.
+LEGACY_DESCRIBE = {
+    "describe.intro.perfect": "The predicted output perfectly matches the gold.",
+    "describe.intro.imperfect": "The predicted output scores overall {score_pct}, let us align the predicted output to the gold and analyze the differences:\n",
+    "describe.item.match": '{indent}The predicted value "{pred}" exactly matches the gold.\n',
+    "describe.item.mismatch": '{indent}The predicted value "{pred}" does not match the gold "{gold}" (score={score_pct}).\n',
+    "describe.ref.match": '{indent}The predicted reference "{pred}" matches the gold reference "{gold}" under the inferred id mapping.\n',
+    "describe.ref.mismatch": '{indent}The predicted reference "{pred}" does not match the gold reference "{gold}" under the inferred id mapping (score={score_pct}).\n',
+    "describe.id.match": "",
+    "describe.id.mismatch": "",
+    "describe.list.match": "{indent}The predicted list perfectly matches the gold one:\n",
+    "describe.list.mismatch": "{indent}The predicted list scores {score_pct}:\n",
+    "describe.list.excess": '{indent}The predicted list item "{pred}" is excessive, it was not in the gold.\n',
+    "describe.list.missing": '{indent}The predicted output misses the "{gold}" list item from the gold.\n',
+    "describe.dict.match": "{indent}The predicted dictionary perfectly matches the gold one:\n",
+    "describe.dict.mismatch": "{indent}The predicted dictionary scores {score_pct}:\n",
+    "describe.dict.key.match": '{indent}KEY = The predicted key "{pred}" exactly matches the gold.\n',
+    "describe.dict.key.mismatch": '{indent}KEY = The predicted key "{pred}" does not match the gold "{gold}" (score={score_pct}).\n',
+    "describe.dict.value.prefix": "{indent}VALUE = ",
+    "describe.validation_error": 'JSON Schema validation failed for path="{path}". Error message: {message}.',
 }
 
 # Captured from src/object_aligner/feedback.py DEFAULT_FEEDBACK_TEMPLATES

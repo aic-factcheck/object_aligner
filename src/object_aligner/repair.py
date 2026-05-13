@@ -195,7 +195,7 @@ def generate_repairs(
     # Filter by min_contribution. Key-rename pairs are atomic: keep both iff
     # the add (which carries the delta) passes.
     if min_contribution > 0.0:
-        ops = _filter_by_min_contribution(ops, min_contribution)
+        ops = _filter_paired_ops(ops, min_contribution)
 
     # Sort: descending by score_delta, ties broken by (path, op, kind) lex.
     ops.sort(key=lambda o: (-o.score_delta, o.path, o.op, o.kind))
@@ -633,20 +633,21 @@ def _walk_dict(
 
 
 # -----------------------------------------------------------------------------
-# min_contribution filtering (key-rename pairs treated atomically)
+# Score-delta filter shared with feedback.py (key-rename pairs are atomic)
 # -----------------------------------------------------------------------------
 
-def _filter_by_min_contribution(ops: list, threshold: float) -> list:
-    # Group key-rename pairs by pair_id and decide on the add's delta.
-    pair_decision: dict[str, bool] = {}
+def _filter_paired_ops(ops, threshold: float) -> list:
+    """Keep ops with ``score_delta >= threshold``; key-rename pairs are kept
+    atomically (iff the ``key_rename_add`` half passes the threshold)."""
+    pair_pass: dict[str, bool] = {}
     for op in ops:
         if op.pair_id and op.kind == "key_rename_add":
-            pair_decision[op.pair_id] = op.score_delta >= threshold
+            pair_pass[op.pair_id] = op.score_delta >= threshold
 
     kept = []
     for op in ops:
         if op.pair_id:
-            if pair_decision.get(op.pair_id, False):
+            if pair_pass.get(op.pair_id, False):
                 kept.append(op)
             continue
         if op.score_delta >= threshold:

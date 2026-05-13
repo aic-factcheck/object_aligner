@@ -4,7 +4,7 @@
 
 While `align()` gives you the raw match tree, `metric()` is the high-level API
 designed for evaluation pipelines. It combines schema validation, alignment,
-and optional human-readable explanation into a single call.
+and optional human-readable description into a single call.
 
 ---
 
@@ -13,7 +13,7 @@ and optional human-readable explanation into a single call.
 ```python
 aligner = ObjectAligner(schema)
 
-result = aligner.metric(gold, pred, debug=False, generate_reasoning=None)
+result = aligner.metric(gold, pred, debug=False, generate_description=None)
 ```
 
 ### Parameters
@@ -23,7 +23,7 @@ result = aligner.metric(gold, pred, debug=False, generate_reasoning=None)
 | `gold` | any | *(required)* | Ground truth object |
 | `pred` | any | *(required)* | Predicted object |
 | `debug` | bool | `False` | If `True`, include a structured `"debug"` alignment tree made only of basic Python container/scalar types |
-| `generate_reasoning` | `bool \| None` | `None` | Per-call override for the constructor default. See [`reasoning.md`](reasoning.md). |
+| `generate_description` | `bool \| "full" \| None` | `None` | Per-call override for the constructor default. See [`describe.md`](describe.md). |
 
 `metric()` also accepts `generate_feedback` for the prompt-optimizer feedback
 string — see [`feedback.md`](feedback.md).
@@ -49,11 +49,11 @@ When `debug=True`, it also includes a structured alignment tree:
 }
 ```
 
-When `generate_reasoning=True` (or the constructor default is set), the
-returned dict additionally contains a `"reasoning"` key with a plain-English
-explanation of the alignment. The full chapter, including the rendering
-model, every template key, and 10+ worked examples, is
-[`reasoning.md`](reasoning.md).
+When `generate_description=True` (or the constructor default is set), the
+returned dict additionally contains a `"description"` key with a plain-English
+walk of the alignment. The full chapter, including the rendering model,
+every template key, and worked examples, is
+[`describe.md`](describe.md).
 
 ---
 
@@ -68,14 +68,14 @@ schema using `jsonschema.validate`:
 
 ### Validation failure shape
 
-With reasoning disabled:
+With description disabled:
 
 ```python
 {"score": 0.0}
 ```
 
-With reasoning enabled, the reasoning string carries the validation error
-message — see [`reasoning.md`](reasoning.md#validation-errors).
+With description enabled, the description string carries the validation
+error message — see [`describe.md`](describe.md#validation-errors).
 
 ### Example: Validation failure
 
@@ -159,18 +159,18 @@ for i, (gold, pred) in enumerate(examples, start=1):
 | Feature | `align()` | `metric()` |
 |---------|-----------|------------|
 | Schema validation | Optional (`skip_validation`) | Always (pred failure → score 0) |
-| Return type | Match object (`MatchItem`/`MatchList`/`MatchDict`) | `{"score": float}` (+ optional `reasoning`, `feedback`, `debug` keys) |
+| Return type | Match object (`MatchItem`/`MatchList`/`MatchDict`) | `{"score": float}` (+ optional `description`, `feedback`, `debug` keys) |
 | Use case | Programmatic access to alignment tree | Evaluation & reporting |
 
 Use `align()` when you need to inspect or traverse the match tree
 programmatically. Use `metric()` when you want a ready-to-log score, and
-optionally a built-in explanation.
+optionally a built-in description.
 
 ---
 
 ## See also
 
-- [`reasoning.md`](reasoning.md) — the `generate_reasoning` feature in full.
+- [`describe.md`](describe.md) — the `generate_description` feature in full.
 - [`feedback.md`](feedback.md) — `metric(generate_feedback=...)` and the
   prescriptive feedback string for prompt-optimizer reflection slots.
 - [`attribution.md`](attribution.md) — per-path decomposition of the deficit

@@ -26,13 +26,13 @@ schema = {
     "items": {"type": "integer", "score": "exact"},
     "order": "fixed"
 }
-aligner = ObjectAligner(schema, generate_reasoning=True)
+aligner = ObjectAligner(schema, generate_description=True)
 
 # Student got 2nd and 3rd right, missed the 1st
 gold = [42, 7, 13]
 pred = [99, 7, 13]
 result = aligner.metric(gold, pred)
-print(result["reasoning"])
+print(result["description"])
 ```
 
 Output:
@@ -51,7 +51,7 @@ When lists have different lengths, the DP algorithm inserts gaps:
 gold = [1, 2, 4]
 pred = [2, 3]
 result = aligner.metric(gold, pred)
-print(result["reasoning"])
+print(result["description"])
 ```
 
 Output:
@@ -78,7 +78,7 @@ schema = {
     "items": {"type": "string", "score": "jaro", "threshold": 0.5},
     "order": "align"
 }
-aligner = ObjectAligner(schema, generate_reasoning=True)
+aligner = ObjectAligner(schema, generate_description=True)
 
 gold = ["Python", "JavaScript", "SQL"]
 pred = ["Pythn", "SQL", "JavaScrypt"]
@@ -101,9 +101,9 @@ schema = {
     "items": {"type": "string", "score": "jaro", "threshold": 0.5},
     "order": "align"
 }
-aligner = ObjectAligner(schema, generate_reasoning=True)
+aligner = ObjectAligner(schema, generate_description=True)
 result = aligner.metric(gold, pred)
-print(result["reasoning"])
+print(result["description"])
 ```
 
 Output:
@@ -156,12 +156,12 @@ schema = {
     "prefixWeights": [1, 1],  # equal weight for both prefix slots
     "items": {"type": "string"}  # destinations (variable length)
 }
-aligner = ObjectAligner(schema, generate_reasoning=True)
+aligner = ObjectAligner(schema, generate_description=True)
 
 gold = ["car", 5, "airport", "downtown"]
 pred = ["cat", 5, "plane"]  # typo in mode, missing one destination
 result = aligner.metric(gold, pred)
-print(result["reasoning"])
+print(result["description"])
 ```
 
 The prefix `[mode, count]` is compared positionally with weighted averaging. The tail `[destinations...]` is compared using whatever `"order"` is specified (default: `"fixed"`).
@@ -199,10 +199,10 @@ schema = {
     "ignoreExcess": True,
     "ignoreMissing": True
 }
-aligner = ObjectAligner(schema, generate_reasoning=True)
+aligner = ObjectAligner(schema, generate_description=True)
 result = aligner.metric(gold, pred)
 print(f"Score: {result['score']:.2f}")
-print(result["reasoning"])
+print(result["description"])
 ```
 
 Here, the vehicle name and quantity (prefix) contribute twice as much to the score as the destination tags (tail). Even though `"cat"` vs `"car"` is a fuzzy mismatch, the high weight on the prefix helps maintain a reasonable overall score.

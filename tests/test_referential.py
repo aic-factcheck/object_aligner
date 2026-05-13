@@ -490,7 +490,7 @@ def test_warn_on_ambiguous_mapping_off_by_default():
 
 
 # ---------------------------------------------------------------------------
-# 7) Debug tree + reasoning
+# 7) Debug tree + description
 # ---------------------------------------------------------------------------
 
 def test_debug_tree_includes_ref_marker():
@@ -515,7 +515,7 @@ def test_debug_tree_includes_ref_marker():
     assert "id" in markers
 
 
-def test_reasoning_uses_ref_templates_on_mismatch():
+def test_description_uses_ref_templates_on_mismatch():
     aligner = ObjectAligner(RELATIONS_SCHEMA)
     gold = {
         "people": [
@@ -535,8 +535,8 @@ def test_reasoning_uses_ref_templates_on_mismatch():
             {"source": 10, "target": 10, "type": "knows"},
         ],
     }
-    result = aligner.metric(gold, pred, generate_reasoning=True)
-    assert "inferred id mapping" in result["reasoning"]
+    result = aligner.metric(gold, pred, generate_description=True)
+    assert "inferred id mapping" in result["description"]
 
 
 # ---------------------------------------------------------------------------

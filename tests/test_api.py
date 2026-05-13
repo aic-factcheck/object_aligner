@@ -50,30 +50,30 @@ def test_metric_returns_score_only_by_default():
 
 
 
-def test_metric_returns_reasoning_when_enabled_in_constructor():
-    aligner = ObjectAligner({"type": "string", "score": "jaro"}, generate_reasoning=True)
+def test_metric_returns_description_when_enabled_in_constructor():
+    aligner = ObjectAligner({"type": "string", "score": "jaro"}, generate_description=True)
     result = aligner.metric("hello", "hallo")
 
-    assert set(result) == {"score", "reasoning"}
+    assert set(result) == {"score", "description"}
     assert 0.0 <= result["score"] <= 1.0
-    assert isinstance(result["reasoning"], str)
+    assert isinstance(result["description"], str)
 
 
 
-def test_metric_generate_reasoning_true_overrides_constructor_false():
+def test_metric_generate_description_true_overrides_constructor_false():
     aligner = ObjectAligner({"type": "string", "score": "exact"})
 
-    result = aligner.metric("hello", "world", generate_reasoning=True)
+    result = aligner.metric("hello", "world", generate_description=True)
 
-    assert set(result) == {"score", "reasoning"}
-    assert result["reasoning"].startswith("The predicted output scores overall")
+    assert set(result) == {"score", "description"}
+    assert result["description"].startswith("The predicted output scores overall")
 
 
 
-def test_metric_generate_reasoning_false_overrides_constructor_true():
-    aligner = ObjectAligner({"type": "string", "score": "exact"}, generate_reasoning=True)
+def test_metric_generate_description_false_overrides_constructor_true():
+    aligner = ObjectAligner({"type": "string", "score": "exact"}, generate_description=True)
 
-    result = aligner.metric("hello", "world", generate_reasoning=False)
+    result = aligner.metric("hello", "world", generate_description=False)
 
     assert result == {"score": 0.0}
 
@@ -96,7 +96,7 @@ def test_metric_invalid_gold_raises():
 
 
 
-def test_metric_invalid_pred_returns_score_only_when_reasoning_disabled():
+def test_metric_invalid_pred_returns_score_only_when_description_disabled():
     schema = {
         "type": "object",
         "properties": {
@@ -114,7 +114,7 @@ def test_metric_invalid_pred_returns_score_only_when_reasoning_disabled():
 
 
 
-def test_metric_invalid_pred_returns_reasoning_when_enabled():
+def test_metric_invalid_pred_returns_description_when_enabled():
     schema = {
         "type": "object",
         "properties": {
@@ -124,43 +124,43 @@ def test_metric_invalid_pred_returns_reasoning_when_enabled():
         "required": ["name", "age"],
         "keyScore": "exact",
     }
-    aligner = ObjectAligner(schema, generate_reasoning=True)
+    aligner = ObjectAligner(schema, generate_description=True)
 
     result = aligner.metric({"name": "Alice", "age": 30}, {"name": "Alice"})
 
     assert result["score"] == 0.0
-    assert 'JSON Schema validation failed' in result["reasoning"]
+    assert 'JSON Schema validation failed' in result["description"]
 
 
 
-def test_metric_reasoning_for_perfect_and_imperfect_matches():
-    perfect = ObjectAligner({"type": "string", "score": "exact"}, generate_reasoning=True)
-    imperfect = ObjectAligner({"type": "string", "score": "exact"}, generate_reasoning=True)
+def test_metric_description_for_perfect_and_imperfect_matches():
+    perfect = ObjectAligner({"type": "string", "score": "exact"}, generate_description=True)
+    imperfect = ObjectAligner({"type": "string", "score": "exact"}, generate_description=True)
 
-    assert perfect.metric("hello", "hello")["reasoning"] == "The predicted output perfectly matches the gold."
-    assert imperfect.metric("hello", "world")["reasoning"].startswith(
+    assert perfect.metric("hello", "hello")["description"] == "The predicted output perfectly matches the gold."
+    assert imperfect.metric("hello", "world")["description"].startswith(
         "The predicted output scores overall"
     )
 
 
 
-def test_list_reasoning_mentions_missing_and_excessive_items():
+def test_list_description_mentions_missing_and_excessive_items():
     aligner = ObjectAligner(
         {
             "type": "array",
             "items": {"type": "integer", "score": "exact"},
             "order": "fixed",
         },
-        generate_reasoning=True,
+        generate_description=True,
     )
-    reasoning = aligner.metric([1, 2, 4], [2, 3])["reasoning"]
+    description = aligner.metric([1, 2, 4], [2, 3])["description"]
 
-    assert 'misses the "1" list item' in reasoning
-    assert 'list item "3" is excessive' in reasoning
+    assert 'misses the "1" list item' in description
+    assert 'list item "3" is excessive' in description
 
 
 
-def test_dict_reasoning_accumulates_multiple_key_and_value_lines():
+def test_dict_description_accumulates_multiple_key_and_value_lines():
     aligner = ObjectAligner(
         {
             "type": "object",
@@ -173,71 +173,71 @@ def test_dict_reasoning_accumulates_multiple_key_and_value_lines():
             "keyImportance": 1.0,
             "valueImportance": 1.0,
         },
-        generate_reasoning=True,
+        generate_description=True,
     )
-    reasoning = aligner.metric(
+    description = aligner.metric(
         {"name": "John", "age": 24},
         {"nmae": "Johny", "ages": 23},
-    )["reasoning"]
+    )["description"]
 
-    assert reasoning.count('KEY = ') >= 2
-    assert reasoning.count('VALUE = ') >= 2
-    assert 'predicted key "nmae"' in reasoning
-    assert 'predicted key "ages"' in reasoning
+    assert description.count('KEY = ') >= 2
+    assert description.count('VALUE = ') >= 2
+    assert 'predicted key "nmae"' in description
+    assert 'predicted key "ages"' in description
 
 
 
-def test_reasoning_template_override_changes_output():
+def test_description_template_override_changes_output():
     aligner = ObjectAligner(
         {"type": "string", "score": "exact"},
-        generate_reasoning=True,
-        reasoning_templates={"metric.perfect": "Perfect match."},
+        generate_description=True,
+        description_templates={"describe.intro.perfect": "Perfect match."},
     )
 
     result = aligner.metric("hello", "hello")
 
-    assert result == {"score": 1.0, "reasoning": "Perfect match."}
+    assert result == {"score": 1.0, "description": "Perfect match."}
 
 
 
-def test_reasoning_template_partial_override_preserves_other_defaults():
+def test_description_template_partial_override_preserves_other_defaults():
     aligner = ObjectAligner(
         {"type": "string", "score": "exact"},
-        generate_reasoning=True,
-        reasoning_templates={"metric.perfect": "Perfect match."},
+        generate_description=True,
+        description_templates={"describe.intro.perfect": "Perfect match."},
     )
 
     result = aligner.metric("hello", "world")
 
-    assert result["reasoning"].startswith("The predicted output scores overall")
+    assert result["description"].startswith("The predicted output scores overall")
 
 
 
-def test_reasoning_template_unknown_key_raises():
-    with pytest.raises(ValueError, match="Unknown reasoning template keys"):
+def test_description_template_unknown_key_raises():
+    with pytest.raises(ValueError, match="Unknown description template keys"):
         ObjectAligner(
             {"type": "string", "score": "exact"},
-            reasoning_templates={"metric.typo": "nope"},
+            description_templates={"describe.intro.typo": "nope"},
         )
 
 
 
-def test_reasoning_template_unknown_placeholder_raises_at_construction():
+def test_description_template_unknown_placeholder_raises_at_construction():
     with pytest.raises(ValueError, match="unknown placeholder"):
         ObjectAligner(
             {"type": "string", "score": "exact"},
-            reasoning_templates={"item.mismatch": "{indent}got {goldd} vs {pred}\n"},
+            description_templates={"describe.item.mismatch": "{indent}got {goldd} vs {pred}\n"},
         )
 
 
-def test_reasoning_template_partial_placeholders_are_allowed():
+def test_description_template_partial_placeholders_are_allowed():
     aligner = ObjectAligner(
         {"type": "string", "score": "exact"},
-        generate_reasoning=True,
-        reasoning_templates={"item.mismatch": "{indent}mismatch\n"},
+        generate_description=True,
+        description_templates={"describe.item.mismatch": "{indent}mismatch\n"},
     )
     result = aligner.metric("hello", "world")
-    assert "mismatch" in result["reasoning"]
+    assert "mismatch" in result["description"]
 
 
 
@@ -283,7 +283,7 @@ def test_match_and_metric_scores_use_builtin_python_float_types():
             "items": {"type": "integer", "score": "exact"},
             "order": "fixed",
         },
-        generate_reasoning=True,
+        generate_description=True,
     )
 
     match = aligner.align([42, 7, 13], [99, 7, 13])
@@ -335,7 +335,7 @@ def test_metric_debug_returns_python_native_nested_alignment_data():
 
 
 
-def test_nested_reasoning_still_renders_recursively():
+def test_nested_description_still_renders_recursively():
     aligner = ObjectAligner(
         {
             "type": "object",
@@ -349,15 +349,15 @@ def test_nested_reasoning_still_renders_recursively():
             "required": ["skills"],
             "keyScore": "exact",
         },
-        generate_reasoning=True,
+        generate_description=True,
     )
 
-    reasoning = aligner.metric({"skills": ["python", "sql"]}, {"skills": ["python", "rust"]})["reasoning"]
+    description = aligner.metric({"skills": ["python", "sql"]}, {"skills": ["python", "rust"]})["description"]
 
-    assert 'KEY = The predicted key "skills" exactly matches the gold.' in reasoning
-    assert 'The predicted list scores' in reasoning
-    assert 'misses the "sql" list item' in reasoning
-    assert 'list item "rust" is excessive' in reasoning
+    assert 'KEY = The predicted key "skills" exactly matches the gold.' in description
+    assert 'The predicted list scores' in description
+    assert 'misses the "sql" list item' in description
+    assert 'list item "rust" is excessive' in description
 
 
 
@@ -375,7 +375,7 @@ def test_metric_validation_edge_cases_cover_nested_type_and_item_constraints():
             "required": ["person"],
             "keyScore": "exact",
         },
-        generate_reasoning=True,
+        generate_description=True,
     )
     bounded_list = ObjectAligner(
         {
@@ -388,7 +388,7 @@ def test_metric_validation_edge_cases_cover_nested_type_and_item_constraints():
 
     nested_result = nested.metric({"person": {"age": 1}}, {"person": {"age": "bad"}})
     assert nested_result["score"] == 0.0
-    assert '/person/age' in nested_result["reasoning"]
+    assert '/person/age' in nested_result["description"]
 
     assert bounded_list.metric([1, 2], [1]) == {"score": 0.0}
     assert bounded_list.metric([1, 2], [1, 2, 3, 4]) == {"score": 0.0}

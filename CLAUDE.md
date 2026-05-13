@@ -12,7 +12,7 @@ Project knowledge for AI coding assistants.
 
 ## Documentation conventions for `docs/`
 
-These rules cover how to structure new (and edit existing) chapters under `docs/`. The shape was settled with the cleanup that introduced `docs/api.md`, `docs/reasoning.md`, and `research/FUTURE.md`; do not regress it.
+These rules cover how to structure new (and edit existing) chapters under `docs/`. The shape was settled with the cleanup that introduced `docs/api.md`, `docs/describe.md`, and `research/FUTURE.md`; do not regress it.
 
 - **Chapter shape** mirrors `docs/feedback.md`: intro paragraph → quickstart → "Shared setup for the examples" → "The model" → numbered examples → "API reference" (short summary that links into `docs/api.md`, never duplicating signatures) → "Caveats" → "See also" → bottom back-link to `index.md`. A "Future work" / "Roadmap" section is **never** part of a chapter.
 - **Top and bottom back-links.** Every chapter under `docs/` (except `index.md`) opens with a breadcrumb `[Docs](index.md) › <Chapter title>` immediately under the H1, and ends with `[← Documentation home](index.md)` after the See also block. For `docs/api.md` this is injected by `scripts/gen_api_docs.py` (do not hand-edit).
@@ -25,7 +25,7 @@ These rules cover how to structure new (and edit existing) chapters under `docs/
 
 ## Project Overview
 
-**object-aligner** is a Python library for computing similarity scores between structured data objects (JSON-like: dicts, lists, primitives). It aligns a "gold" (reference) object with a "predicted" object and produces a fine-grained similarity score in `[0, 1]`, with optional human-readable reasoning and optional structured debug output.
+**object-aligner** is a Python library for computing similarity scores between structured data objects (JSON-like: dicts, lists, primitives). It aligns a "gold" (reference) object with a "predicted" object and produces a fine-grained similarity score in `[0, 1]`, with optional human-readable descriptions and optional structured debug output.
 
 ## Tech Stack
 
@@ -64,10 +64,10 @@ These rules cover how to structure new (and edit existing) chapters under `docs/
 ## Key Concepts
 
 - **ObjectAligner** — Main class, constructed with:
-  - `ObjectAligner(schema, *, custom_metrics=None, generate_reasoning=False, reasoning_templates=None)`
+  - `ObjectAligner(schema, *, custom_metrics=None, generate_description=False, description_templates=None, description_style="default", generate_feedback=False, feedback_templates=None, feedback_style="gepa", dominant_fraction_threshold=0.60, warn_on_ambiguous_mapping=False)`
 - Primary methods:
   - `align(gold, pred, skip_validation=False)` → returns a `MatchItem` / `MatchList` / `MatchDict` tree
-  - `metric(gold, pred, debug=False, generate_reasoning=None)` → returns `{"score": float}` by default, optionally adding `"reasoning"` and/or `"debug"`
+  - `metric(gold, pred, debug=False, generate_description=None, generate_feedback=None)` → returns `{"score": float}` by default, optionally adding `"description"`, `"feedback"`, and/or `"debug"`
 - **Schema** — JSON Schema–inspired dict that defines data structure plus custom scoring keywords (`score`, `threshold`, `order`, `keyScore`, `valueWeight`, etc.)
 - **Match types** — `MatchItem` (primitives), `MatchList` (arrays), `MatchDict` (objects) — frozen dataclasses with Python `float` scores
 - **Custom metrics** — user-supplied named metric callables registered through `custom_metrics`, referenced declaratively from schema `score`
@@ -126,18 +126,19 @@ All branches are recursive — any nesting depth works naturally.
 - `align()` validates by default unless `skip_validation=True`
 - `metric()` always validates `gold`
 - if `pred` fails validation, `metric()` returns `score: 0.0`
-  - with reasoning disabled: `{"score": 0.0}`
-  - with reasoning enabled: `{"score": 0.0, "reasoning": ...}`
+  - with description disabled: `{"score": 0.0}`
+  - with description enabled: `{"score": 0.0, "description": ...}`
 - `metric(..., debug=True)` adds a structured `"debug"` alignment tree using only basic Python container/scalar types
 - public `score` values should be plain Python `float`, not NumPy scalar types
 - `ObjectAligner(..., warn_on_ambiguous_mapping=False)` emits a `UserWarning` when id-mapping derivation has tied costs (off by default)
 - `aligner.attribute(gold, pred, *, granularity="leaf", include_empty_positions=False, skip_validation=False)` returns an `AttributionResult` decomposing the deficit into per-path contributions (tree-walk; see `docs/attribution.md`). `aligner.attribute_from_match(match_tree, ...)` skips re-alignment.
 - `aligner.repair(gold, pred, *, granularity="leaf", min_contribution=0.0, skip_validation=False)` returns a `RepairResult` with ranked `RepairOp`s (RFC 6902-flavored `add`/`remove`/`replace` with `score_delta`); see `docs/repair.md`. `RepairResult.apply_to(pred)` returns a patched deep copy. `aligner.repair_from_match(match_tree, gold, pred, mappings, ...)` skips re-alignment.
 - `aligner.feedback(gold, pred, *, top_k=5, min_score_delta=0.0, style=None, include_synthesis_line=True, include_metadata=False, dominant_fraction_threshold=None, granularity="leaf", skip_validation=False)` returns a `FeedbackResult` with a top-K prescriptive feedback string for prompt-optimizer reflection slots; see `docs/feedback.md`. Deterministic, no LLM. `aligner.feedback_from_match(match_tree, gold, pred, mappings, ...)` skips re-alignment. Constructor accepts `generate_feedback=False`, `feedback_templates=None`, `feedback_style="gepa"`, `dominant_fraction_threshold=0.60`. `metric(..., generate_feedback=True)` adds a `"feedback"` string key; `generate_feedback="full"` adds the structured dict shape from `FeedbackResult.to_dict()`. Any other value raises `ValueError`.
-- `MatchList.kind` is `"reorder"` / `"fixed"` / `"prefix"` / `"combined"` (default `""`); used by attribution and repair to select the per-aggregator α schedule. Live in `src/object_aligner/attribution.py` and `src/object_aligner/repair.py`.
-- Template validation (unknown keys, bad placeholders, non-string values) is shared between `reasoning_templates` and `feedback_templates` via `src/object_aligner/_templates.py:validate_templates`. Internal-only; not part of the public API.
-- Default template strings live as TOML data under `src/object_aligner/templates/` (`reasoning.toml`, `feedback.toml`, `feedback.compact.toml`) and are loaded at module-import time via `_templates.py:_load_packaged_template` (uses `importlib.resources` + stdlib `tomllib`). Python source only holds the placeholder allowlists (`_TEMPLATE_PLACEHOLDERS`, `_FEEDBACK_PLACEHOLDERS`) and the renderer code. Editing template wording is a `.toml` edit, not a code change. `tests/_legacy_template_snapshots.py` holds a frozen byte-identical copy of the pre-externalization defaults so accidental drift is caught by `tests/test_templates.py`.
-- `load_templates_from_toml(path)` (public, re-exported from the package root) loads a user-supplied TOML override file and returns a flat `dict[str, str]` suitable for passing as `reasoning_templates=` or `feedback_templates=` to `ObjectAligner(...)`. Accepts both flat (`"feedback.op.key_add" = "..."`) and nested-table (`[feedback.op]`) TOML styles.
+- `aligner.describe(gold, pred, *, style=None, skip_validation=False)` returns a `DescriptionResult` with `.text` (deterministic indented prose walk of the match tree) and `.entries` (one `DescriptionEntry` per visited node — `path`, `depth`, `match_kind`, `outcome`, `score`, `text`); see `docs/describe.md`. Deterministic, no LLM. Two styles ship: `"default"` (prose) and `"json"` (empty `.text`, populated `.entries`). `aligner.describe_from_match(match_tree, ...)` skips re-alignment (no `mappings` needed — describe walks the match tree only). Constructor accepts `generate_description=False`, `description_templates=None`, `description_style="default"`. `metric(..., generate_description=True)` adds a `"description"` string key; `generate_description="full"` adds the structured dict shape from `DescriptionResult.to_dict()`. Any other value raises `ValueError`.
+- `MatchList.kind` is `"reorder"` / `"fixed"` / `"prefix"` / `"combined"` (default `""`); used by attribution, repair, and describe (for path-emission rules) to select the per-aggregator α schedule. Live in `src/object_aligner/attribution.py`, `src/object_aligner/repair.py`, and `src/object_aligner/describe.py`.
+- Template validation (unknown keys, bad placeholders, non-string values) is shared between `description_templates` and `feedback_templates` via `src/object_aligner/_templates.py:validate_templates`. Internal-only; not part of the public API.
+- Default template strings live as TOML data under `src/object_aligner/templates/` (`describe.toml`, `feedback.toml`, `feedback.compact.toml`) and are loaded at module-import time via `_templates.py:_load_packaged_template` (uses `importlib.resources` + stdlib `tomllib`). Python source only holds the placeholder allowlists (`_DESCRIPTION_PLACEHOLDERS` in `describe.py`, `_FEEDBACK_PLACEHOLDERS` in `feedback.py`) and the renderer code. Editing template wording is a `.toml` edit, not a code change. `tests/_legacy_template_snapshots.py` holds a frozen byte-identical copy of the shipped defaults so accidental drift is caught by `tests/test_templates.py`.
+- `load_templates_from_toml(path)` (public, re-exported from the package root) loads a user-supplied TOML override file and returns a flat `dict[str, str]` suitable for passing as `description_templates=` or `feedback_templates=` to `ObjectAligner(...)`. Accepts both flat (`"feedback.op.key_add" = "..."`) and nested-table (`[feedback.op]`) TOML styles.
 
 ## Roadmap
 

@@ -6,6 +6,7 @@ from pathlib import Path
 import pytest
 
 from object_aligner import (
+    DEFAULT_DESCRIPTION_TEMPLATES,
     DEFAULT_FEEDBACK_TEMPLATES,
     ObjectAligner,
     load_templates_from_toml,
@@ -15,16 +16,13 @@ from object_aligner._templates import (
     _load_packaged_template,
     validate_templates,
 )
+from object_aligner.describe import _DESCRIPTION_PLACEHOLDERS
 from object_aligner.feedback import _COMPACT_OVERRIDES, _FEEDBACK_PLACEHOLDERS
-from object_aligner.object_aligner import (
-    DEFAULT_REASONING_TEMPLATES,
-    _TEMPLATE_PLACEHOLDERS,
-)
 
 from tests._legacy_template_snapshots import (
     LEGACY_COMPACT,
+    LEGACY_DESCRIBE,
     LEGACY_FEEDBACK,
-    LEGACY_REASONING,
 )
 
 
@@ -32,8 +30,8 @@ from tests._legacy_template_snapshots import (
 # Group A — packaged template loading at import time
 # -----------------------------------------------------------------------------
 
-def test_reasoning_defaults_have_expected_keys():
-    assert set(DEFAULT_REASONING_TEMPLATES) == set(_TEMPLATE_PLACEHOLDERS)
+def test_description_defaults_have_expected_keys():
+    assert set(DEFAULT_DESCRIPTION_TEMPLATES) == set(_DESCRIPTION_PLACEHOLDERS)
 
 
 def test_feedback_defaults_have_expected_keys():
@@ -48,13 +46,13 @@ def test_compact_overlay_only_overrides_known_keys():
     assert len(_COMPACT_OVERRIDES) < len(DEFAULT_FEEDBACK_TEMPLATES)
 
 
-def test_packaged_reasoning_defaults_pass_placeholder_validation():
+def test_packaged_description_defaults_pass_placeholder_validation():
     # Already runs at import; calling again as a regression net.
     validate_templates(
-        DEFAULT_REASONING_TEMPLATES,
-        DEFAULT_REASONING_TEMPLATES,
-        _TEMPLATE_PLACEHOLDERS,
-        kind="reasoning",
+        DEFAULT_DESCRIPTION_TEMPLATES,
+        DEFAULT_DESCRIPTION_TEMPLATES,
+        _DESCRIPTION_PLACEHOLDERS,
+        kind="description",
     )
 
 
@@ -179,20 +177,20 @@ def test_loaded_dict_round_trips_through_objectaligner(tmp_path):
     assert "TOML-LOADED" in fb.text
 
 
-def test_loaded_dict_works_for_reasoning_overrides(tmp_path):
-    p = tmp_path / "reasoning.toml"
+def test_loaded_dict_works_for_description_overrides(tmp_path):
+    p = tmp_path / "describe.toml"
     p.write_text(
-        '"metric.perfect" = "Reasoning override fires"\n',
+        '"describe.intro.perfect" = "Description override fires"\n',
         encoding="utf-8",
     )
     overrides = load_templates_from_toml(p)
     aligner = ObjectAligner(
         {"type": "string", "score": "exact"},
-        reasoning_templates=overrides,
-        generate_reasoning=True,
+        description_templates=overrides,
+        generate_description=True,
     )
     r = aligner.metric("a", "a")
-    assert r["reasoning"] == "Reasoning override fires"
+    assert r["description"] == "Description override fires"
 
 
 def test_load_supports_pathlib_path_and_str(tmp_path):
@@ -207,8 +205,8 @@ def test_load_supports_pathlib_path_and_str(tmp_path):
 # Group C — snapshot equivalence with pre-refactor in-source defaults
 # -----------------------------------------------------------------------------
 
-def test_reasoning_defaults_byte_identical_to_legacy_snapshot():
-    assert DEFAULT_REASONING_TEMPLATES == LEGACY_REASONING
+def test_description_defaults_byte_identical_to_legacy_snapshot():
+    assert DEFAULT_DESCRIPTION_TEMPLATES == LEGACY_DESCRIBE
 
 
 def test_feedback_defaults_byte_identical_to_legacy_snapshot():

@@ -446,7 +446,7 @@ result is non-deterministic for this input.
 ## See also
 
 - [Schema Reference — Referential ids](schema_reference.md#referential-ids-idscope-ref)
-- [The Metric Function](metric.md) for the surrounding API and debug/reasoning output.
+- [The Metric Function](metric.md) for the surrounding API and debug/description output.
 - [`api.md`](api.md) — generated API reference.
 
 [← Documentation home](index.md)

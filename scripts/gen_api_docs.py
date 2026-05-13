@@ -41,6 +41,15 @@ GROUPS: list[tuple[str, list[str]]] = [
     ),
     ("Repair", ["generate_repairs", "RepairOp", "RepairResult"]),
     (
+        "Description",
+        [
+            "render_description",
+            "DescriptionEntry",
+            "DescriptionResult",
+            "DEFAULT_DESCRIPTION_TEMPLATES",
+        ],
+    ),
+    (
         "Feedback",
         [
             "render_feedback",
@@ -60,6 +69,8 @@ OBJECT_ALIGNER_METHODS: list[str] = [
     "attribute_from_match",
     "repair",
     "repair_from_match",
+    "describe",
+    "describe_from_match",
     "feedback",
     "feedback_from_match",
 ]

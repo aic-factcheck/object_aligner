@@ -141,6 +141,18 @@ def test_key_value_importance_sum_zero_raises_at_construction():
         })
 
 
+def test_value_weights_sum_zero_raises_at_construction():
+    with pytest.raises(ValueError, match="valueWeights"):
+        ObjectAligner({
+            "type": "object",
+            "properties": {
+                "a": {"type": "string", "valueWeight": 0.0},
+                "b": {"type": "string", "valueWeight": 0.0},
+            },
+            "keyScore": "exact",
+        })
+
+
 def test_value_weights_affect_value_score():
     aligner = ObjectAligner({
             "type": "object",

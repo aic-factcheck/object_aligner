@@ -10,7 +10,6 @@ from object_aligner.object_aligner import (
     similarity_exact,
     similarity_num_inv_diff,
     similarity_string_jaro,
-    to_pct_str,
 )
 
 
@@ -51,8 +50,6 @@ def test_similarity_string_jaro_characteristic_cases():
 def test_misc_utility_formatters():
     assert path2str([]) == "/"
     assert path2str(["person", "age"]) == "/person/age"
-    assert to_pct_str(0.125) == "12%"
-    assert to_pct_str(1.0) == "100%"
 
 
 def test_match_dataclasses_instantiate():

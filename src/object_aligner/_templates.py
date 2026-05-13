@@ -1,16 +1,16 @@
 """Shared template-validation and -loading helpers.
 
-* ``validate_templates`` — used by both ``_merge_reasoning_templates`` (in
-  ``object_aligner.py``) and the feedback-template merger (in
-  ``feedback.py``). Validates a user-provided overrides mapping against a
-  default dict and a per-key allowed-placeholder table, then returns a
-  merged dict (defaults overlaid by overrides).
+* ``validate_templates`` — used by both ``merge_description_templates`` (in
+  ``describe.py``) and ``merge_feedback_templates`` (in ``feedback.py``).
+  Validates a user-provided overrides mapping against a default dict and
+  a per-key allowed-placeholder table, then returns a merged dict
+  (defaults overlaid by overrides).
 * ``_load_packaged_template`` — loads a TOML template file that ships with
   the package (under ``object_aligner/templates/``). Used at module import
   time to populate the ``DEFAULT_*_TEMPLATES`` constants.
 * ``load_templates_from_toml`` — public helper: load templates from a
   user-supplied TOML file. Returns a flat ``dict[str, str]`` suitable for
-  passing as ``reasoning_templates`` or ``feedback_templates``.
+  passing as ``description_templates`` or ``feedback_templates``.
 """
 
 from __future__ import annotations
@@ -47,7 +47,7 @@ def validate_templates(
         Mapping from each template key to the set of placeholder names
         permitted in that template.
     kind
-        Either ``"reasoning"`` or ``"feedback"`` — used only in error
+        ``"description"`` or ``"feedback"`` — used only in error
         messages so the caller doesn't have to format them.
 
     Returns
@@ -151,7 +151,7 @@ def load_templates_from_toml(path) -> dict[str, str]:
 
     Returns:
         A flat `{template_key: template_string}` dict suitable for
-        passing as `feedback_templates=` or `reasoning_templates=` to
+        passing as `feedback_templates=` or `description_templates=` to
         `ObjectAligner(...)`.
 
     Raises:
