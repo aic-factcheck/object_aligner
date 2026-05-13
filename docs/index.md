@@ -48,6 +48,7 @@ The older `ObjectAligner("name", schema)` form and `get_name()` have been remove
 | 6 | [The Metric Function](metric.md) | End-to-end evaluation with validation and optional reasoning |
 | 7 | [Referential Alignment](referential.md) | Matching graphs and multi-graphs whose ids are arbitrary handles |
 | 8 | [Schema Reference](schema_reference.md) | Complete reference of all schema keywords |
+| 9 | [Per-Property Score Attribution](attribution.md) | Decompose the deficit into ranked per-path contributions |
 
 ## Installation
 

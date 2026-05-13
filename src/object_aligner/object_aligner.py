@@ -27,6 +27,7 @@ class MatchItem:
 class MatchList:
     score: float
     children: list = field(default_factory=list)
+    kind: str = ""
 
     def __post_init__(self):
         object.__setattr__(self, "score", float(self.score))
@@ -821,7 +822,7 @@ class ObjectAligner:
         d = max(n, m)
 
         if d == 0:
-            return {"gold": gold, "pred": pred, "match": MatchList(score=1.0, children=[])}
+            return {"gold": gold, "pred": pred, "match": MatchList(score=1.0, children=[], kind="reorder")}
 
         similarity_matrix = np.zeros((d, d))
         subs = np.empty((n, m), dtype=object)
@@ -870,23 +871,23 @@ class ObjectAligner:
         else:
             score = float(np.sum([s.score for s in aligned_scores])) / D
         score = max(0.0, min(1.0, score))
-        return {"gold": aligned_gold, "pred": aligned_pred, "match": MatchList(score=score, children=aligned_scores)}
+        return {"gold": aligned_gold, "pred": aligned_pred, "match": MatchList(score=score, children=aligned_scores, kind="reorder")}
 
     def _align_lists_fixed(self, gold, pred, schema, ctx):
         n, m = len(gold), len(pred)
         if n == 0 and m == 0:
-            return {"gold": [], "pred": [], "match": MatchList(score=1.0, children=[])}
+            return {"gold": [], "pred": [], "match": MatchList(score=1.0, children=[], kind="fixed")}
         if n == 0:
             return {
                 "gold": [None] * m,
                 "pred": pred,
-                "match": MatchList(score=0.0, children=[MatchItem(score=0.0, gold=None, pred=e) for e in pred]),
+                "match": MatchList(score=0.0, children=[MatchItem(score=0.0, gold=None, pred=e) for e in pred], kind="fixed"),
             }
         if m == 0:
             return {
                 "gold": gold,
                 "pred": [None] * n,
-                "match": MatchList(score=0.0, children=[MatchItem(score=0.0, gold=e, pred=None) for e in gold]),
+                "match": MatchList(score=0.0, children=[MatchItem(score=0.0, gold=e, pred=None) for e in gold], kind="fixed"),
             }
         dp = np.zeros((n + 1, m + 1))
         subs = np.zeros((n + 1, m + 1), dtype=object)
@@ -963,7 +964,7 @@ class ObjectAligner:
         else:
             score = float(dp[n][m]) / D
         score = max(0.0, min(1.0, score))
-        return {"gold": aligned_gold, "pred": aligned_pred, "match": MatchList(score=score, children=aligned_scores)}
+        return {"gold": aligned_gold, "pred": aligned_pred, "match": MatchList(score=score, children=aligned_scores, kind="fixed")}
 
     def _align_lists_prefix(self, gold, pred, schema, ctx):
         aligned_gold = []
@@ -997,7 +998,7 @@ class ObjectAligner:
         weights = weights / weights.sum()
         score = float(np.sum([e.score * w for e, w in zip(aligned_matches, weights)]))
         score = max(0.0, min(1.0, score))
-        return {"gold": aligned_gold, "pred": aligned_pred, "match": MatchList(score=score, children=aligned_matches)}
+        return {"gold": aligned_gold, "pred": aligned_pred, "match": MatchList(score=score, children=aligned_matches, kind="prefix")}
 
     def _align_lists(self, g, p, schema, ctx):
         if "prefixItems" not in schema and "items" not in schema:
@@ -1033,7 +1034,7 @@ class ObjectAligner:
         rscore = rets[1]["match"].score
         score = pi * pscore + ri * rscore
         children = rets[0]["match"].children + rets[1]["match"].children
-        return {"gold": gold, "pred": pred, "match": MatchList(score=score, children=children)}
+        return {"gold": gold, "pred": pred, "match": MatchList(score=score, children=children, kind="combined")}
 
     def _align_dicts(self, g, p, schema, ctx):
         match_key = schema.get("keyScore", "jaro")
@@ -1250,6 +1251,66 @@ class ObjectAligner:
             ctx.pred_ids = self._collect_pred_ids(p)
             ctx.current_mappings, ctx.pred_excess_ids = self._derive_id_mappings(g, p, ctx)
         return self._align_helper(g, p, self.schema, ctx)["match"]
+
+    def attribute(
+        self,
+        gold,
+        pred,
+        *,
+        granularity="leaf",
+        include_empty_positions=False,
+        skip_validation=False,
+    ):
+        """Decompose the score of ``(gold, pred)`` into per-path contributions.
+
+        Runs ``align()`` then walks the resulting match tree, returning an
+        ``AttributionResult`` whose ``entries`` list ranks paths by how much
+        of the deficit they account for. See ``attribution.tree_walk_attribution``
+        for the algorithm and ``docs/attribution.md`` for examples.
+
+        Like ``metric()``, this method validates ``gold`` against the schema.
+        If ``pred`` fails validation it returns an empty result with
+        ``score=0.0``.
+        """
+        from object_aligner.attribution import AttributionResult, tree_walk_attribution
+
+        if not skip_validation:
+            self._validator.validate(gold)
+            try:
+                self._validator.validate(pred)
+            except ValidationError:
+                return AttributionResult(
+                    score=0.0,
+                    entries=(),
+                    granularity=granularity,
+                    total_contribution=0.0,
+                    residual=-1.0,
+                )
+
+        match_tree = self.align(gold, pred, skip_validation=True)
+        return tree_walk_attribution(
+            match_tree,
+            self.schema,
+            granularity=granularity,
+            include_empty_positions=include_empty_positions,
+        )
+
+    def attribute_from_match(
+        self,
+        match_tree,
+        *,
+        granularity="leaf",
+        include_empty_positions=False,
+    ):
+        """Attribute an already-computed match tree without re-running align()."""
+        from object_aligner.attribution import tree_walk_attribution
+
+        return tree_walk_attribution(
+            match_tree,
+            self.schema,
+            granularity=granularity,
+            include_empty_positions=include_empty_positions,
+        )
 
     def metric(self, gold, pred, debug=False, generate_reasoning=None):
         """Score ``pred`` against ``gold`` and return a result dict.

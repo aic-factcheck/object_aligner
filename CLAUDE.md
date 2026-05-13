@@ -118,6 +118,8 @@ All branches are recursive — any nesting depth works naturally.
 - `metric(..., debug=True)` adds a structured `"debug"` alignment tree using only basic Python container/scalar types
 - public `score` values should be plain Python `float`, not NumPy scalar types
 - `ObjectAligner(..., warn_on_ambiguous_mapping=False)` emits a `UserWarning` when id-mapping derivation has tied costs (off by default)
+- `aligner.attribute(gold, pred, *, granularity="leaf", include_empty_positions=False, skip_validation=False)` returns an `AttributionResult` decomposing the deficit into per-path contributions (tree-walk; see `docs/attribution.md`). `aligner.attribute_from_match(match_tree, ...)` skips re-alignment.
+- `MatchList.kind` is `"reorder"` / `"fixed"` / `"prefix"` / `"combined"` (default `""`); used by attribution to select the per-aggregator α schedule. Live in `src/object_aligner/attribution.py`.
 
 ## Custom Schema Keywords (beyond JSON Schema)
 
