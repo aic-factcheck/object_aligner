@@ -1,0 +1,49 @@
+site_name: object-aligner
+site_description: Python library for fine-grained similarity scoring between structured data objects
+docs_dir: docs
+
+theme:
+  name: material
+  features:
+    - navigation.sections
+    - content.code.copy
+    - search.highlight
+
+markdown_extensions:
+  - admonition
+  - attr_list
+  - pymdownx.superfences
+  - pymdownx.arithmatex:
+      generic: true
+  - toc:
+      permalink: true
+
+plugins:
+  - search
+  # docs/api.md is generated as plain Markdown by scripts/gen_api_docs.py —
+  # no live introspection plugin needed. The HTML site just renders the
+  # checked-in Markdown.
+
+validation:
+  # Cross-folder links into ../research/ are real (GitHub renders them) but
+  # mkdocs only sees files inside docs/. Downgrade those link warnings so
+  # they don't drown out the actionable ones.
+  links:
+    not_found: ignore
+    anchors: warn
+
+nav:
+  - Home: index.md
+  - Concepts & Architecture: concepts.md
+  - Primitive Types: primitives.md
+  - Lists & Arrays: lists.md
+  - Dictionaries & Objects: dicts.md
+  - Nesting & Complex Structures: nesting.md
+  - The Metric Function: metric.md
+  - Plain-English Reasoning: reasoning.md
+  - Referential Alignment: referential.md
+  - Schema Reference: schema_reference.md
+  - Per-Property Score Attribution: attribution.md
+  - Scored JSON-Patch Repair: repair.md
+  - Prompt-Optimizer Feedback: feedback.md
+  - API Reference: api.md

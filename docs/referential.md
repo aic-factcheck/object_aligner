@@ -1,4 +1,6 @@
-# 7. Referential Alignment
+# 8. Referential Alignment
+
+[Docs](index.md) › Referential Alignment
 
 This chapter covers **referential alignment** — a mode in which selected
 primitive fields are treated as **id handles** whose concrete values are
@@ -53,7 +55,18 @@ form an alignable list).
 (with a `UserWarning`); these fields are matched symbolically through the
 mapping, not via a primitive metric.
 
-See [Schema Reference](schema_reference.md#referential-ids-idscope--ref) for the keyword summary.
+See [Schema Reference](schema_reference.md#referential-ids-idscope-ref) for the keyword summary.
+
+---
+
+## Shared setup for the examples
+
+Every example below builds its own `schema`, `gold`, and `pred` (each
+example illustrates a different graph shape) but shares the import:
+
+```python
+from object_aligner import ObjectAligner
+```
 
 ---
 
@@ -432,5 +445,8 @@ result is non-deterministic for this input.
 
 ## See also
 
-- [Schema Reference — Referential ids](schema_reference.md#referential-ids-idscope--ref)
+- [Schema Reference — Referential ids](schema_reference.md#referential-ids-idscope-ref)
 - [The Metric Function](metric.md) for the surrounding API and debug/reasoning output.
+- [`api.md`](api.md) — generated API reference.
+
+[← Documentation home](index.md)

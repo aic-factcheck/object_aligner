@@ -1,5 +1,7 @@
 # 5. Nesting & Complex Structures
 
+[Docs](index.md) › Nesting & Complex Structures
+
 The real power of Object Aligner emerges with deeply nested data. Since every alignment method recursively calls `_align_helper`, you can combine objects, arrays, and primitives at arbitrary depth.
 
 This chapter walks through realistic examples of increasing complexity.
@@ -280,3 +282,14 @@ Design highlights:
 5. **Set thresholds** to prevent garbage pairings. A `keyThreshold` of 0.5 prevents "age" from matching "title".
 
 6. **Use `ignoreExcess`/`ignoreMissing`** for open-ended lists where over- or under-generation shouldn't be heavily penalized.
+
+---
+
+## See also
+
+- [`lists.md`](lists.md) — list alignment in depth.
+- [`dicts.md`](dicts.md) — dict alignment in depth.
+- [`metric.md`](metric.md) — end-to-end evaluation calls.
+- [`api.md`](api.md) — generated API reference.
+
+[← Documentation home](index.md)

@@ -4,10 +4,6 @@ Turns a ``RepairResult`` (produced by ``object_aligner.repair``) into a
 top-K ranked, prescriptive, optimizer-shaped feedback string suitable for
 DSPy / GEPA / TextGrad reflection slots — *deterministically, no LLM*.
 
-The design rationale is recorded in
-``research/opus47_promptopt_feedback.md`` and the implementation plan in
-``research/opus47_novelty_extensions_summary.md`` Cluster 3.
-
 The module is a *renderer*, not a generator: every numeric value
 (``score_delta``, ``score_delta_pct``) is read off the ``RepairOp``
 records that ``object_aligner.repair.generate_repairs`` already produced.
@@ -163,10 +159,22 @@ validate_templates(
 class FeedbackEntry:
     """One rendered feedback line plus its structured backing fields.
 
-    ``rank`` is the *visible* rank: silenced entries (those whose template
-    renders to empty text, like the default ``key_rename_remove``) inherit
-    the rank of their paired ``key_rename_add`` so the visible numbering
-    stays contiguous. Standalone silenced entries get rank ``0``.
+    `rank` is the *visible* rank: silenced entries (those whose template
+    renders to empty text, like the default `key_rename_remove`) inherit
+    the rank of their paired `key_rename_add` so the visible numbering
+    stays contiguous. Standalone silenced entries get rank `0`.
+
+    Attributes:
+        rank: Visible 1-based rank in the rendered feedback message.
+        op_kind: Fine-grained op discriminator (mirrors `RepairOp.kind`).
+        op: RFC 6902 op (`"add"` / `"remove"` / `"replace"`).
+        path: RFC 6901 JSON Pointer at which the repair would apply.
+        score_delta: Approximate deficit closure if the op were applied.
+        score_delta_pct: `score_delta * 100`, rounded for display.
+        gold: Gold value at the patch site (informational).
+        pred: Predicted value at the patch site (informational).
+        text: Rendered template body — what the consumer prints.
+        pair_id: Non-empty for paired ops that must be applied together.
     """
 
     rank: int
@@ -183,7 +191,24 @@ class FeedbackEntry:
 
 @dataclass(frozen=True)
 class FeedbackResult:
-    """Result of a single ``render_feedback()`` call."""
+    """Result of a single `render_feedback()` call.
+
+    `str(result)` returns `result.text`. Iterable: `for entry in result`
+    yields `FeedbackEntry`s in visible-rank order.
+
+    Attributes:
+        score: Overall similarity in `[0, 1]`.
+        text: Fully rendered feedback string, suitable for pasting into
+            a DSPy / GEPA / TextGrad reflection slot.
+        entries: Structured backing entries, in visible-rank order.
+        style: The style name used to render (`"gepa"`, `"compact"`,
+            etc.).
+        truncated: `True` if the underlying repair list contained more
+            ops than `top_k` allowed.
+        n_total_ops: Total candidate ops before top-K truncation.
+        error_breakdown: Per-op-kind contribution summary as a dict —
+            used to drive synthesis-line phrasing.
+    """
 
     score: float
     text: str
@@ -208,9 +233,11 @@ class FeedbackResult:
     def to_dict(self) -> dict:
         """Serialize to a basic-types dict — usable as JSON.
 
-        ``entries`` becomes a list of dicts; ``gold`` / ``pred`` values
-        are passed through as-is (caller is responsible for ensuring they
-        are JSON-serializable if that matters).
+        Returns:
+            Dict with the same shape as `FeedbackResult` but with
+            `entries` as a list of dicts. `gold` / `pred` values are
+            passed through as-is (caller is responsible for ensuring
+            they are JSON-serializable if that matters).
         """
         return {
             "score": self.score,
@@ -512,38 +539,38 @@ def render_feedback(
     value_formatter: Callable[[Any], str] | None = None,
     dominant_fraction_threshold: float = _DEFAULT_DOMINANT_FRACTION,
 ) -> FeedbackResult:
-    """Render a ``RepairResult`` as a top-K ranked feedback string.
+    """Render a `RepairResult` as a top-K ranked feedback string.
 
-    See ``docs/feedback.md`` for the full design and examples.
+    See [`docs/feedback.md`](../feedback.md) for the full design and
+    examples.
 
-    Parameters
-    ----------
-    repair_result
-        Result from ``aligner.repair()`` / ``aligner.repair_from_match()``.
-    top_k
-        Maximum number of entries to render. ``None`` = unlimited; ``0``
-        renders the ``feedback.empty`` template only.
-    min_score_delta
-        Drop ops with ``score_delta`` strictly below this value. Default
-        ``0.0`` keeps every positive-delta op.
-    style
-        ``"gepa"`` (default), ``"compact"``, or ``"json"``.
-    include_synthesis_line
-        Whether to append the trailing synthesis sentence
-        (single-dominant or mixed). Default ``True``.
-    include_metadata
-        Populate ``FeedbackResult.error_breakdown`` (sum by op_kind over
-        the full ops list, not just the displayed ones).
-    templates
-        User template overrides. May be ``None`` (use defaults), a partial
-        override dict, or a fully-merged dict.
-    value_formatter
-        ``(value) -> str`` callable used to format ``gold`` / ``pred``
-        values in templates. Default truncates ``repr(value)`` to 80
-        chars.
-    dominant_fraction_threshold
-        Threshold above which the single-dominant synthesis line fires.
-        Default ``0.60``.
+    Args:
+        repair_result: Result from `aligner.repair()` or
+            `aligner.repair_from_match()`.
+        top_k: Maximum number of entries to render. `None` = unlimited;
+            `0` renders the `feedback.empty` template only.
+        min_score_delta: Drop ops with `score_delta` strictly below this
+            value. Default `0.0` keeps every positive-delta op.
+        style: `"gepa"` (default), `"compact"`, or `"json"`.
+        include_synthesis_line: Whether to append the trailing synthesis
+            sentence (single-dominant or mixed).
+        include_metadata: Populate `FeedbackResult.error_breakdown` (sum
+            by op_kind over the full ops list, not just the displayed
+            ones).
+        templates: User template overrides. May be `None` (use defaults),
+            a partial override dict, or a fully-merged dict.
+        value_formatter: `(value) -> str` callable used to format `gold`
+            / `pred` values in templates. Default truncates `repr(value)`
+            to 80 chars.
+        dominant_fraction_threshold: Threshold above which the
+            single-dominant synthesis line fires. Default `0.60`.
+
+    Returns:
+        `FeedbackResult` whose `text` is the fully rendered top-K
+        feedback string.
+
+    Raises:
+        ValueError: If `style` is not a registered style.
     """
     _validate_style(style)
     fmt = value_formatter or _default_value_formatter

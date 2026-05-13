@@ -10,6 +10,19 @@ Project knowledge for AI coding assistants.
 
 - **Typeset equations in Markdown files with LaTeX math**: `$…$` for inline and `$$…$$` for display blocks. Do not use ASCII art, plain-text formulas, or unicode-math approximations. Renders natively in GitHub, MkDocs (`pymdownx.arithmatex`), Pandoc, and VS Code preview.
 
+## Documentation conventions for `docs/`
+
+These rules cover how to structure new (and edit existing) chapters under `docs/`. The shape was settled with the cleanup that introduced `docs/api.md`, `docs/reasoning.md`, and `research/FUTURE.md`; do not regress it.
+
+- **Chapter shape** mirrors `docs/feedback.md`: intro paragraph → quickstart → "Shared setup for the examples" → "The model" → numbered examples → "API reference" (short summary that links into `docs/api.md`, never duplicating signatures) → "Caveats" → "See also" → bottom back-link to `index.md`. A "Future work" / "Roadmap" section is **never** part of a chapter.
+- **Top and bottom back-links.** Every chapter under `docs/` (except `index.md`) opens with a breadcrumb `[Docs](index.md) › <Chapter title>` immediately under the H1, and ends with `[← Documentation home](index.md)` after the See also block. For `docs/api.md` this is injected by `scripts/gen_api_docs.py` (do not hand-edit).
+- **Examples must be paste-runnable.** Each chapter has at most one "Shared setup for the examples" block early on that defines a schema, an `aligner`, and a `gold` / `pred` pair. Subsequent examples may reuse those names directly. Any example that uses a *different* schema must build it inline (its own imports and `ObjectAligner(...)` call) and the prose must say so explicitly ("This example uses a different schema:").
+- **Roadmap.** All forward-looking / "not committed yet" bullets live in `research/FUTURE.md`. Do not add Future-work sections to chapter files or to `CLAUDE.md`.
+- **`research/` is private.** The `research/` directory is untracked development scratch space (design notes, internal decisions, the roadmap). It MUST NOT be linked or named from anything that ships publicly: no Markdown links from `docs/`, no mentions inside `docs/api.md`, no Markdown links or backtick references in any docstring under `src/object_aligner/` (those land in the generated `docs/api.md`). `CLAUDE.md` itself may reference `research/` because it is internal project knowledge for contributors. Enforce with `grep -RIn "research/" docs/ src/object_aligner/` returning zero hits.
+- **API reference is generated plain Markdown.** `docs/api.md` is produced by `scripts/gen_api_docs.py` — stdlib-only Python that introspects `object_aligner.__all__`, parses Google-style docstrings, and emits headings + signature blocks + parameter bullets + field tables as ordinary Markdown. Do not hand-edit the file. To update it: (a) edit the corresponding `"""..."""` block in `src/object_aligner/` using Google style (`Args:` / `Returns:` / `Raises:` / `Attributes:` sections); (b) run `uv run python scripts/gen_api_docs.py`; (c) commit both the source change and the regenerated `docs/api.md`. Anchors are deterministic GitHub-style slugs (`#objectaligner`, `#objectalignermetric`, `#load_templates_from_toml`); chapter cross-links use those. For classes whose constructor parameters are documented on `__init__` (not the class docstring itself), the generator falls back to `__init__`'s `Args:` block so constructor arguments still render under the class heading.
+- **Site build (optional HTML bonus).** `pyproject.toml` declares an optional `[project.optional-dependencies] docs` group (`mkdocs`, `mkdocs-material`). Install once with `uv sync --extra docs`, then `uv run mkdocs serve` for a live preview at `http://127.0.0.1:8000/` or `uv run mkdocs build` for a static site under `./site/`. The HTML build is a convenience; the source of truth is the Markdown files themselves. The canonical gate is "build emits no anchor warnings and no missing-doc-file warnings". `--strict` is **not** the gate: any incidental cross-folder link mkdocs cannot resolve is downgraded via `validation.links.not_found: ignore` in `mkdocs.yml`.
+- **Nav upkeep.** Adding a new chapter under `docs/` requires also adding it to the `nav:` list in `mkdocs.yml`. Without that the file is reachable on GitHub but invisible in the rendered site.
+
 ## Project Overview
 
 **object-aligner** is a Python library for computing similarity scores between structured data objects (JSON-like: dicts, lists, primitives). It aligns a "gold" (reference) object with a "predicted" object and produces a fine-grained similarity score in `[0, 1]`, with optional human-readable reasoning and optional structured debug output.
@@ -126,14 +139,11 @@ All branches are recursive — any nesting depth works naturally.
 - Default template strings live as TOML data under `src/object_aligner/templates/` (`reasoning.toml`, `feedback.toml`, `feedback.compact.toml`) and are loaded at module-import time via `_templates.py:_load_packaged_template` (uses `importlib.resources` + stdlib `tomllib`). Python source only holds the placeholder allowlists (`_TEMPLATE_PLACEHOLDERS`, `_FEEDBACK_PLACEHOLDERS`) and the renderer code. Editing template wording is a `.toml` edit, not a code change. `tests/_legacy_template_snapshots.py` holds a frozen byte-identical copy of the pre-externalization defaults so accidental drift is caught by `tests/test_templates.py`.
 - `load_templates_from_toml(path)` (public, re-exported from the package root) loads a user-supplied TOML override file and returns a flat `dict[str, str]` suitable for passing as `reasoning_templates=` or `feedback_templates=` to `ObjectAligner(...)`. Accepts both flat (`"feedback.op.key_add" = "..."`) and nested-table (`[feedback.op]`) TOML styles.
 
-## Future work / planned extensions
+## Roadmap
 
-- `mode="exact"` for `repair()` (and counterfactual mode for `attribute()`): apply each candidate op, re-run `metric()`, surface true score deltas. Shares a patch-and-evaluate primitive with Cluster 1 counterfactual — will land together. See `research/opus47_json_patch.md` §2 and §5.
-- `move` op support in `repair()` for key renames (replacing the two-op `key_rename_remove` + `key_rename_add` pair) and `kind="fixed"` list reorderings. See `research/opus47_json_patch.md` §3.1 and §6.3.
-- DSPy / GEPA optional adapter modules (`object_aligner/dspy.py`, `object_aligner/gepa.py`) as optional installs (`pip install object-aligner[dspy]` etc.) that expose `aligner.feedback()` through each framework's `Metric` / `Reflector` callable contract. See `research/opus47_promptopt_feedback.md` §6.
-- Experimental DSPy + OA-feedback vs DSPy + LLM-judge demo under `experiments/dspy_gepa_demo.py` — kept separate from `src/` to avoid coupling the library to LLM API availability. See `research/opus47_promptopt_feedback.md` §6.2.
-- `"verbose"` feedback style preset including metric names (`jaro`, `invdiff`) and α-weight chains. See `research/opus47_promptopt_feedback.md` §4.4.
-- Template-key stability policy for `feedback_templates` and `reasoning_templates`: keys may be **added** (with sensible English defaults so existing user overrides keep working) when the underlying op-kind / match-type taxonomy grows; renames and removals are not permitted within a major version. See `research/opus47_promptopt_feedback.md` §7.5.
+See [`research/FUTURE.md`](research/FUTURE.md) for the single source of
+truth on planned but uncommitted work. Do not add Future-work bullets here
+or in chapter files under `docs/` — link to `research/FUTURE.md` instead.
 
 ## Custom Schema Keywords (beyond JSON Schema)
 

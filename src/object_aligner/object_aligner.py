@@ -15,6 +15,21 @@ from object_aligner._templates import _load_packaged_template, validate_template
 
 @dataclass(frozen=True)
 class MatchItem:
+    """Leaf node of the alignment tree, produced for a single primitive value.
+
+    Returned by [`ObjectAligner.align`][object_aligner.ObjectAligner.align]
+    whenever the schema type is `string`, `number`, `integer`, or `boolean`.
+    Also produced for `idScope` and `ref` primitives.
+
+    Attributes:
+        score: Similarity in `[0, 1]` between `gold` and `pred`.
+        gold: The gold (reference) primitive value.
+        pred: The predicted primitive value.
+        kind: `"id"` for `idScope` fields, `"ref"` for `ref` fields, and
+            `""` otherwise. Surfaced as `"marker"` in the debug tree when
+            non-empty.
+    """
+
     score: float
     gold: Any
     pred: Any
@@ -26,6 +41,23 @@ class MatchItem:
 
 @dataclass(frozen=True)
 class MatchList:
+    """Alignment node for a list-typed schema.
+
+    Returned by [`ObjectAligner.align`][object_aligner.ObjectAligner.align]
+    when the schema type is `array`. The `children` list is the per-element
+    alignment in alignment order; for `order: "align"` lists this is the
+    order produced by the Hungarian matching, not the original `pred` order.
+
+    Attributes:
+        score: Aggregate similarity in `[0, 1]`.
+        children: Per-child match nodes (`MatchItem`, `MatchList`, or
+            `MatchDict`) in alignment order.
+        kind: `"reorder"` / `"fixed"` / `"prefix"` / `"combined"` based on
+            the list aggregator selected by the schema; `""` if not set.
+            Consumed by attribution/repair to pick the per-aggregator α
+            schedule.
+    """
+
     score: float
     children: list = field(default_factory=list)
     kind: str = ""
@@ -36,6 +68,18 @@ class MatchList:
 
 @dataclass(frozen=True)
 class MatchDict:
+    """Alignment node for an object-typed schema.
+
+    Returned by [`ObjectAligner.align`][object_aligner.ObjectAligner.align]
+    when the schema type is `object`. `children` maps a key match
+    (`MatchItem` over the keys) to the corresponding value match.
+
+    Attributes:
+        score: Aggregate similarity in `[0, 1]`.
+        children: Mapping from a key-level `MatchItem` to the value-level
+            match (`MatchItem`, `MatchList`, or `MatchDict`).
+    """
+
     score: float
     children: dict = field(default_factory=dict)
 
@@ -296,6 +340,22 @@ class _ReasoningRenderer:
 
 
 class ObjectAligner:
+    """Aligns a gold object against a predicted object under a schema.
+
+    `ObjectAligner` is the entry point for every alignment operation in the
+    library: scoring (`metric`), tree extraction (`align`), per-path deficit
+    decomposition (`attribute`), structured repair operations (`repair`), and
+    prompt-optimizer feedback (`feedback`). One instance is bound to one
+    schema; it is safe to share across threads because per-call state lives
+    in an internal `_AlignContext` that is created per call.
+
+    The constructor validates the schema, builds the JSON Schema validator
+    used by `metric()`, resolves the custom-metric registry, and discovers
+    the dependency order between `idScope` declarations.
+
+    See [`docs/concepts.md`](../concepts.md) for the architectural tour.
+    """
+
     def __init__(
         self,
         schema,
@@ -309,28 +369,51 @@ class ObjectAligner:
         dominant_fraction_threshold=0.60,
         warn_on_ambiguous_mapping=False,
     ):
-        """Create an object aligner.
+        """Initialize an `ObjectAligner` for the given schema.
 
-        custom_metrics maps schema types ("string", "number", "integer") to
-        mappings of metric name -> callable. Each callable must accept
-        ``(gold, pred)`` and return a real-valued score in ``[0, 1]``. Integer
-        schemas use built-in number metrics and fall back to custom ``number``
-        metrics unless overridden by a custom ``integer`` metric with the same
-        name.
+        Args:
+            schema: JSON-Schema-inspired dict describing the structure and
+                scoring of the objects to be aligned. See
+                [`docs/schema_reference.md`](../schema_reference.md) for the
+                full list of supported keywords.
+            custom_metrics: Optional mapping from schema type
+                (`"string"` / `"number"` / `"integer"`) to a mapping of
+                `name -> callable(gold, pred) -> float in [0, 1]`. Integer
+                schemas use built-in number metrics and fall back to custom
+                `number` metrics unless overridden by a custom `integer`
+                metric with the same name. Boolean scoring is exact-only
+                and cannot be customized.
+            generate_reasoning: Default for the `generate_reasoning`
+                parameter of `metric()`. When `True`, `metric()` returns
+                include a `"reasoning"` string key. See
+                [`docs/reasoning.md`](../reasoning.md).
+            reasoning_templates: Optional partial override of the packaged
+                reasoning templates. Unknown keys or unknown placeholders
+                raise `ValueError`.
+            generate_feedback: Default for the `generate_feedback`
+                parameter of `metric()`. When truthy, `metric()` returns
+                include a `"feedback"` key. Accepts `True` / `False` /
+                `"full"`; see [`docs/feedback.md`](../feedback.md).
+            feedback_templates: Optional partial override of the packaged
+                feedback templates. Validated against the same allowlist
+                machinery as `reasoning_templates`.
+            feedback_style: One of the registered feedback styles
+                (default `"gepa"`). Controls phrasing and synthesis-line
+                shape.
+            dominant_fraction_threshold: Fraction of the deficit that one
+                op kind must own for the feedback synthesis line to switch
+                between the "single dominant" and "mixed" phrasings.
+                Defaults to `0.60`.
+            warn_on_ambiguous_mapping: If `True`, emit a `UserWarning`
+                whenever the Hungarian-derived id mapping for an `idScope`
+                is non-unique because of tied costs. Off by default.
 
-        ``generate_reasoning`` / ``reasoning_templates`` configure the human-
-        readable whole-tree reasoning output produced by ``metric()``.
-
-        ``generate_feedback`` / ``feedback_templates`` / ``feedback_style`` /
-        ``dominant_fraction_threshold`` configure the prompt-optimizer
-        feedback output. See ``docs/feedback.md``. The defaults render a
-        ``"gepa"``-style top-5 message with a synthesis line; the
-        ``dominant_fraction_threshold`` controls when the synthesis line
-        switches between "single dominant" and "mixed" phrasing.
-
-        warn_on_ambiguous_mapping enables a ``UserWarning`` whenever the
-        Hungarian-derived id mapping for an ``idScope`` is non-unique because
-        of tied costs. Off by default.
+        Raises:
+            ValueError: If `custom_metrics` contains an unsupported schema
+                type, collides with a built-in metric name, or
+                `feedback_style` is not a registered style.
+            jsonschema.SchemaError: If `schema` itself is not a valid JSON
+                Schema.
         """
         from object_aligner.feedback import (
             _FeedbackRenderer,
@@ -1255,14 +1338,29 @@ class ObjectAligner:
         raise TypeError(f"Unknown match instance: {aligned!r}")
 
     def align(self, g, p, skip_validation=False):
-        """Align ``g`` (gold) to ``p`` (pred) and return a match tree.
+        """Align gold to pred and return the match tree.
 
-        Returns a ``MatchItem`` / ``MatchList`` / ``MatchDict`` whose ``.score``
-        is in ``[0, 1]``. ``gold`` and ``pred`` are both validated against the
-        schema unless ``skip_validation=True``.
+        Builds a per-call context, so concurrent calls on the same
+        `ObjectAligner` instance are safe. See
+        [`docs/concepts.md`](../concepts.md) for the algorithmic flow.
 
-        Each call builds its own per-call context, so concurrent calls on the
-        same ``ObjectAligner`` instance are safe.
+        Args:
+            g: Gold (reference) object. Must match the schema unless
+                `skip_validation=True`.
+            p: Predicted object. Must match the schema unless
+                `skip_validation=True`.
+            skip_validation: If `True`, skip JSON Schema validation of both
+                inputs (caller is responsible for ensuring well-formedness).
+
+        Returns:
+            A frozen `MatchItem`, `MatchList`, or `MatchDict` whose `.score`
+            is in `[0, 1]`. The concrete type is selected by the schema's
+            top-level type.
+
+        Raises:
+            jsonschema.ValidationError: If validation is enabled and either
+                input fails.
+            TypeError: If `g` and `p` are not of the same Python type.
         """
         match, _ = self._align_with_ctx(g, p, skip_validation=skip_validation)
         return match
@@ -1295,16 +1393,29 @@ class ObjectAligner:
         include_empty_positions=False,
         skip_validation=False,
     ):
-        """Decompose the score of ``(gold, pred)`` into per-path contributions.
+        """Decompose the score deficit into per-path contributions.
 
-        Runs ``align()`` then walks the resulting match tree, returning an
-        ``AttributionResult`` whose ``entries`` list ranks paths by how much
-        of the deficit they account for. See ``attribution.tree_walk_attribution``
-        for the algorithm and ``docs/attribution.md`` for examples.
+        Runs `align()` internally then walks the resulting match tree. See
+        [`docs/attribution.md`](../attribution.md) for examples.
 
-        Like ``metric()``, this method validates ``gold`` against the schema.
-        If ``pred`` fails validation it returns an empty result with
-        ``score=0.0``.
+        Args:
+            gold: Gold (reference) object.
+            pred: Predicted object.
+            granularity: `"leaf"` (default) emits one entry per leaf; other
+                values control subtree-level rollups.
+            include_empty_positions: When `True`, list-position gaps with
+                zero contribution are emitted as explicit entries.
+            skip_validation: If `True`, skip JSON Schema validation of
+                `gold` and `pred`.
+
+        Returns:
+            `AttributionResult` whose `entries` is ranked by per-path
+            contribution. If `pred` fails validation, returns an empty
+            result with `score=0.0`.
+
+        Raises:
+            jsonschema.ValidationError: If `gold` fails validation
+                (validation enabled).
         """
         from object_aligner.attribution import AttributionResult, tree_walk_attribution
 
@@ -1336,7 +1447,19 @@ class ObjectAligner:
         granularity="leaf",
         include_empty_positions=False,
     ):
-        """Attribute an already-computed match tree without re-running align()."""
+        """Attribute an already-computed match tree without re-running `align()`.
+
+        Useful when you have already produced a match tree (e.g., to derive
+        both `metric()` and `attribute()` outputs without aligning twice).
+
+        Args:
+            match_tree: A match tree returned by `align()`.
+            granularity: See `attribute()`.
+            include_empty_positions: See `attribute()`.
+
+        Returns:
+            `AttributionResult` — same shape as `attribute()`.
+        """
         from object_aligner.attribution import tree_walk_attribution
 
         return tree_walk_attribution(
@@ -1355,19 +1478,29 @@ class ObjectAligner:
         min_contribution=0.0,
         skip_validation=False,
     ):
-        """Emit a ranked list of scored repair ops for ``(gold, pred)``.
+        """Emit a ranked list of scored repair ops for `(gold, pred)`.
 
-        Each ``RepairOp`` carries an estimated ``score_delta`` — how much of
-        the deficit ``1 - S`` applying the op would close. See
-        ``docs/repair.md`` for examples and ``research/opus47_json_patch.md``
-        for the design rationale.
+        Each `RepairOp` carries an estimated `score_delta` — how much of the
+        deficit `1 - S` applying the op would close. v1 implements the
+        *approximate* flavor only; deltas come from the tree-walk math.
+        See [`docs/repair.md`](../repair.md) for examples.
 
-        v1 implements the *approximate* flavor only: deltas are read from the
-        tree-walk attribution math. The *exact* flavor is planned future work.
+        Args:
+            gold: Gold (reference) object.
+            pred: Predicted object.
+            granularity: `"leaf"` (default) or subtree-level rollups.
+            min_contribution: Drop ops whose `score_delta` falls below this
+                threshold.
+            skip_validation: If `True`, skip JSON Schema validation.
 
-        Mirrors ``attribute()`` for validation: validates ``gold`` against the
-        schema; if ``pred`` fails validation returns an empty result with
-        ``score=0.0``.
+        Returns:
+            `RepairResult` whose `ops` is ranked by `score_delta`. If
+            `pred` fails validation, returns an empty result with
+            `score=0.0`.
+
+        Raises:
+            jsonschema.ValidationError: If `gold` fails validation
+                (validation enabled).
         """
         from object_aligner.repair import RepairResult, generate_repairs
 
@@ -1407,10 +1540,22 @@ class ObjectAligner:
     ):
         """Generate repair ops from an already-computed match tree.
 
-        ``mappings`` is the ``ctx.current_mappings`` dict from the align-time
-        context, needed for ``ref_fix`` ops. If you produced ``match_tree``
-        via ``align()`` and your schema declares ``ref`` fields, prefer the
-        ``repair()`` method (which captures the mappings automatically).
+        Args:
+            match_tree: A match tree returned by `align()`.
+            gold: Gold object (used to read source values for `add` ops).
+            pred: Predicted object (used to read source values for
+                `remove` ops).
+            mappings: The `ctx.current_mappings` dict from the align-time
+                context, needed for `ref_fix` ops. If your schema has no
+                `ref` fields it can be `None` or `{}`. If `match_tree` was
+                produced by `align()` and your schema declares `ref`
+                fields, prefer `repair()` (which captures mappings
+                automatically).
+            granularity: See `repair()`.
+            min_contribution: See `repair()`.
+
+        Returns:
+            `RepairResult` — same shape as `repair()`.
         """
         from object_aligner.repair import generate_repairs
 
@@ -1438,17 +1583,42 @@ class ObjectAligner:
         granularity="leaf",
         skip_validation=False,
     ):
-        """Render prompt-optimizer feedback for ``(gold, pred)``.
+        """Render prompt-optimizer feedback for `(gold, pred)`.
 
         Aligns once internally and walks the repair tree; never invokes an
-        LLM. Returns a ``FeedbackResult`` whose ``.text`` is suitable for
-        pasting into a DSPy / GEPA / TextGrad reflection slot. See
-        ``docs/feedback.md`` for the full surface and examples.
+        LLM. The output is deterministic and template-driven. See
+        [`docs/feedback.md`](../feedback.md) for examples.
 
-        Validation mirrors ``repair()`` / ``attribute()``: validates ``gold``
-        against the schema; if ``pred`` fails validation returns a degenerate
-        ``FeedbackResult`` with ``score=0.0`` and a rendered validation-error
-        message as ``text``.
+        Args:
+            gold: Gold (reference) object.
+            pred: Predicted object.
+            top_k: Maximum number of feedback entries to render.
+            min_score_delta: Drop entries whose `score_delta` falls below
+                this threshold before ranking.
+            style: Override the constructor `feedback_style`. `None`
+                defers to the instance default.
+            include_synthesis_line: When `True`, append a one-line
+                synthesis at the end (e.g., "Single dominant error:
+                year extractor."). Phrasing controlled by
+                `dominant_fraction_threshold`.
+            include_metadata: When `True`, include op-kind / α-chain
+                metadata in each entry (for ablation work).
+            dominant_fraction_threshold: Override the constructor
+                threshold for switching between "single dominant" and
+                "mixed" synthesis-line phrasing. `None` defers to the
+                instance default.
+            granularity: See `attribute()` / `repair()`.
+            skip_validation: If `True`, skip JSON Schema validation.
+
+        Returns:
+            `FeedbackResult` whose `text` is suitable for pasting into a
+            DSPy / GEPA / TextGrad reflection slot. On validation failure
+            of `pred`, returns a degenerate result with `score=0.0` and a
+            rendered validation-error message as `text`.
+
+        Raises:
+            jsonschema.ValidationError: If `gold` fails validation
+                (validation enabled).
         """
         from object_aligner.feedback import FeedbackResult, render_feedback
 
@@ -1508,9 +1678,22 @@ class ObjectAligner:
     ):
         """Render feedback from an already-computed match tree.
 
-        ``mappings`` is the ``ctx.current_mappings`` dict from the align-time
-        context, needed for ``ref_fix`` ops. If your schema has no ``ref``
-        fields it can be ``None`` or ``{}``.
+        Args:
+            match_tree: A match tree returned by `align()`.
+            gold: Gold object.
+            pred: Predicted object.
+            mappings: `ctx.current_mappings` from the align-time context.
+                Can be `None` or `{}` if your schema has no `ref` fields.
+            top_k: See `feedback()`.
+            min_score_delta: See `feedback()`.
+            style: See `feedback()`.
+            include_synthesis_line: See `feedback()`.
+            include_metadata: See `feedback()`.
+            dominant_fraction_threshold: See `feedback()`.
+            granularity: See `feedback()`.
+
+        Returns:
+            `FeedbackResult` — same shape as `feedback()`.
         """
         from object_aligner.feedback import render_feedback
 
@@ -1541,21 +1724,41 @@ class ObjectAligner:
         generate_reasoning=None,
         generate_feedback=None,
     ):
-        """Score ``pred`` against ``gold`` and return a result dict.
+        """Score `pred` against `gold` and return a result dict.
 
-        Always validates ``gold`` against the schema. If ``pred`` fails
-        validation, returns ``{"score": 0.0}`` (with ``"reasoning"`` describing
-        the validation error when reasoning is enabled, and likewise for
-        ``"feedback"``). Otherwise returns ``{"score": float}`` plus optional
-        ``"reasoning"``, ``"feedback"``, and ``"debug"`` entries.
+        Always validates `gold`. If `pred` fails validation, returns
+        `{"score": 0.0}` (with a `"reasoning"` / `"feedback"` describing
+        the error when those are enabled). Safe to call concurrently on a
+        single instance.
 
-        ``generate_feedback`` accepts ``None`` (use the instance default),
-        ``False`` / ``True`` (a string under ``"feedback"``), or ``"full"``
-        (a structured ``dict`` of basic types — the same shape as
-        ``FeedbackResult.to_dict()``). Any other value raises ``ValueError``.
+        Args:
+            gold: Gold (reference) object. Must pass schema validation.
+            pred: Predicted object. Validation failure here is non-fatal:
+                a score of `0.0` is returned.
+            debug: When `True`, the returned dict also contains a
+                `"debug"` key with a structured alignment tree built out
+                of basic Python container/scalar types.
+            generate_reasoning: Per-call override of the constructor
+                default. `None` defers to the instance setting; `True` /
+                `False` flips it for this call. See
+                [`docs/reasoning.md`](../reasoning.md).
+            generate_feedback: Per-call override of the constructor
+                default. `None` uses the instance setting. Accepts
+                `False` / `True` (renders feedback as a string under
+                `"feedback"`) or `"full"` (a structured dict — the same
+                shape as `FeedbackResult.to_dict()`). Any other value
+                raises `ValueError`. See
+                [`docs/feedback.md`](../feedback.md).
 
-        Like ``align()``, this method is safe to call concurrently on a single
-        instance.
+        Returns:
+            Dict with required key `"score"` (Python `float` in `[0, 1]`)
+            and optional keys `"reasoning"` (str), `"feedback"`
+            (str or dict), and `"debug"` (dict) based on the flags.
+
+        Raises:
+            jsonschema.ValidationError: If `gold` fails validation.
+            ValueError: If `generate_feedback` is not `None` / `False` /
+                `True` / `"full"`.
         """
         self._validator.validate(gold)
 

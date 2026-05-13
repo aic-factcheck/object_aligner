@@ -1,4 +1,6 @@
-# 7. Schema Reference
+# 9. Schema Reference
+
+[Docs](index.md) › Schema Reference
 
 This is a complete reference of all schema keywords recognized by Object Aligner. Keywords marked with ⚡ are custom extensions beyond standard JSON Schema.
 
@@ -150,3 +152,15 @@ Uses the Hungarian algorithm (via `scipy.optimize.linear_sum_assignment`):
 | `keyThreshold` ⚡ | float | `0.0` | Minimum key similarity to form a pairing; pairs below this are treated as unaligned |
 | `keyImportance` ⚡ | float | `1.0` | Weight of key score in the final dict score |
 | `valueImportance` ⚡ | float | `1.0` | Weight of value score in the final dict score |
+
+---
+
+## See also
+
+- [`primitives.md`](primitives.md) — string, number, boolean leaves.
+- [`lists.md`](lists.md) — array keywords in context.
+- [`dicts.md`](dicts.md) — object keywords in context.
+- [`referential.md`](referential.md) — `idScope` / `ref` semantics.
+- [`api.md`](api.md) — generated API reference.
+
+[← Documentation home](index.md)

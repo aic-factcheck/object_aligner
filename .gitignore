@@ -13,5 +13,12 @@ wheels/
 .yeaah/
 .claude/
 
-# research is internal only
-research/
+# research is internal only — except FUTURE.md, the shared roadmap.
+# Use a glob inside research/ rather than excluding the directory itself,
+# so the negation below can re-include FUTURE.md (Git can't re-include
+# files inside a fully-excluded directory).
+research/*
+!research/FUTURE.md
+
+# mkdocs build output
+site/

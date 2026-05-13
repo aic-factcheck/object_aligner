@@ -138,22 +138,26 @@ def _load_packaged_template(name: str) -> dict[str, str]:
 def load_templates_from_toml(path) -> dict[str, str]:
     """Load templates from a user-supplied TOML file.
 
-    Returns a flat ``{template_key: template_string}`` dict suitable for
-    passing as ``feedback_templates=`` or ``reasoning_templates=`` to
-    ``ObjectAligner(...)``. Does **not** validate keys or placeholders —
-    that happens when ``ObjectAligner`` merges the dict against the
-    defaults for its template family. Bad keys / placeholders surface as
-    ``ValueError`` from the constructor; bad TOML / bad value types
-    surface here.
+    Accepts both flat (`"feedback.op.key_add" = "..."`) and nested-table
+    (`[feedback.op]` ... `key_add = "..."`) styles. Does **not** validate
+    keys or placeholders — that happens when `ObjectAligner` merges the
+    dict against the defaults for its template family. Bad keys or
+    placeholders surface as `ValueError` from the constructor; bad TOML
+    or bad value types surface here.
 
-    Raises
-    ------
-    FileNotFoundError
-        ``path`` does not exist.
-    tomllib.TOMLDecodeError
-        The file is not valid TOML.
-    TypeError
-        A value in the file is not a string.
+    Args:
+        path: Path-like pointing to a TOML file containing template
+            overrides.
+
+    Returns:
+        A flat `{template_key: template_string}` dict suitable for
+        passing as `feedback_templates=` or `reasoning_templates=` to
+        `ObjectAligner(...)`.
+
+    Raises:
+        FileNotFoundError: `path` does not exist.
+        tomllib.TOMLDecodeError: The file is not valid TOML.
+        TypeError: A value in the file is not a string.
     """
     p = Path(path)
     with p.open("rb") as f:

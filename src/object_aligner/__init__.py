@@ -6,7 +6,7 @@ from object_aligner.feedback import (
     FeedbackResult,
     render_feedback,
 )
-from object_aligner.object_aligner import ObjectAligner
+from object_aligner.object_aligner import MatchDict, MatchItem, MatchList, ObjectAligner
 from object_aligner.repair import RepairOp, RepairResult, generate_repairs
 
 __all__ = [
@@ -15,6 +15,9 @@ __all__ = [
     "DEFAULT_FEEDBACK_TEMPLATES",
     "FeedbackEntry",
     "FeedbackResult",
+    "MatchDict",
+    "MatchItem",
+    "MatchList",
     "ObjectAligner",
     "RepairOp",
     "RepairResult",

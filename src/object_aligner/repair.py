@@ -7,8 +7,7 @@ the op would close.
 
 v1 is the **approximate** flavor: ``score_delta`` is read from the same per-
 aggregator alpha schedules that drive ``tree_walk_attribution`` in
-``attribution.py``. The relationship to the (not-yet-shipped) Cluster 1
-counterfactual flavor is documented in ``research/opus47_json_patch.md`` §2.
+``attribution.py``.
 
 The module also vendors a small ``_apply_op`` utility that supports our op
 subset on Python ``dict`` / ``list`` / primitive structures (not JSON
@@ -44,10 +43,25 @@ _OP_REPLACE = "replace"
 class RepairOp:
     """One scored repair operation.
 
-    ``op`` is one of ``"add"`` / ``"remove"`` / ``"replace"`` (RFC 6902
-    vocabulary). ``kind`` is a finer discriminator — see
-    ``docs/repair.md`` for the full table. ``score_delta`` is positive
-    and represents how much of the deficit applying this op would close.
+    Conforms to RFC 6902 JSON Patch vocabulary at the `op` level, plus a
+    finer-grained `kind` discriminator the library uses to dispatch on op
+    semantics. See [`docs/repair.md`](../repair.md) for the full
+    `kind` table.
+
+    Attributes:
+        op: One of `"add"` / `"remove"` / `"replace"`.
+        path: RFC 6901 JSON Pointer locating the patch site.
+        score_delta: Positive — how much of the deficit `1 - S` applying
+            this op would close (approximate, v1).
+        kind: Finer discriminator (`primitive_replace`, `key_add`,
+            `list_item_missing`, `ref_fix`, etc.).
+        value: For `add` / `replace` ops, the value to write.
+        gold: Gold value at the patch site (informational, useful for
+            rendering feedback).
+        pred: Predicted value at the patch site (informational).
+        pair_id: Non-empty for ops that must be applied atomically with
+            another op (currently `key_rename_remove` + `key_rename_add`
+            pairs).
     """
 
     op: str
@@ -62,7 +76,24 @@ class RepairOp:
 
 @dataclass(frozen=True)
 class RepairResult:
-    """Result of a single ``repair()`` call."""
+    """Result of a single `repair()` call.
+
+    Iterable: `for op in result: ...` yields `RepairOp`s in rank order.
+    Indexable: `result[0]` is the highest-`score_delta` op.
+
+    Attributes:
+        score: Overall similarity in `[0, 1]` (i.e. the value `metric()`
+            would return for the same inputs).
+        ops: Ranked tuple of `RepairOp` rows.
+        granularity: `"leaf"`, `"subtree"`, or `"all"`.
+        total_delta: Sum of `score_delta` across `ops`.
+        residual: `total_delta - (1 - score)`. Non-zero indicates the
+            ranked ops do not fully close the deficit under the
+            approximate flavor.
+        notes: Free-form strings flagging when the patch's semantics
+            interact with re-pairing (e.g., an `order: "align"` list
+            present in the schema).
+    """
 
     score: float
     ops: tuple = field(default_factory=tuple)
@@ -81,7 +112,15 @@ class RepairResult:
         return self.ops[idx]
 
     def apply_to(self, target: Any) -> Any:
-        """Apply every op (in result order) to a deep copy of ``target``."""
+        """Apply every op (in result order) to a deep copy of `target`.
+
+        Args:
+            target: The object to patch (typically the same `pred` that
+                produced this result).
+
+        Returns:
+            A deep copy of `target` with every op applied in result order.
+        """
         patched = copy.deepcopy(target)
         for op in self.ops:
             patched = _apply_op(patched, op)
@@ -104,11 +143,32 @@ def generate_repairs(
 ) -> RepairResult:
     """Generate a ranked list of scored repair ops for a match tree.
 
-    ``mappings`` is the per-scope ``{gold_id: pred_id}`` dict captured from
-    the align-time ``_AlignContext.current_mappings``. Required for emitting
-    ``ref_fix`` ops; if ``None`` the walker emits no ``ref_fix`` and uses the
-    raw gold ref value as the suggested replacement (less useful — pred uses
-    arbitrary ids by convention).
+    Approximate flavor (v1): score deltas come from the same tree-walk
+    math as `tree_walk_attribution`.
+
+    Args:
+        match_tree: Match tree from `align()`.
+        schema: The schema that produced `match_tree`.
+        gold: The gold object — read to populate `RepairOp.gold` and
+            source values for `add` ops.
+        pred: The predicted object — read to populate `RepairOp.pred`
+            and source values for `remove` ops.
+        mappings: Per-scope `{gold_id: pred_id}` dict captured from the
+            align-time `_AlignContext.current_mappings`. Required for
+            emitting `ref_fix` ops; if `None`, no `ref_fix` ops are
+            emitted and the walker falls back to using the raw gold ref
+            value as the suggested replacement (less useful — pred uses
+            arbitrary ids by convention).
+        granularity: `"leaf"` (default), `"subtree"`, or `"all"`.
+        min_contribution: Drop ops whose `score_delta` falls below this
+            threshold. Atomic pairs are kept iff the carrying op passes.
+
+    Returns:
+        `RepairResult` whose `ops` are ranked by `score_delta` descending.
+
+    Raises:
+        ValueError: If `granularity` is not one of `"leaf"` / `"subtree"`
+            / `"all"`.
     """
     if granularity not in _VALID_GRANULARITIES:
         raise ValueError(

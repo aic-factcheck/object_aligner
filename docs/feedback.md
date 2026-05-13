@@ -1,5 +1,7 @@
 # 11. Prompt-Optimizer Feedback
 
+[Docs](index.md) › Prompt-Optimizer Feedback
+
 `metric()` answers *how well* a prediction matches the gold. `attribute()`
 answers *where the deficit lives*. `repair()` answers *what to change*.
 **`feedback()`** takes the final step: it turns those signals into a
@@ -14,8 +16,6 @@ feedback layer is a deterministic projection of that work onto a text
 surface.
 
 This page documents the API and shows worked examples for every op kind.
-See [`research/opus47_promptopt_feedback.md`](../research/opus47_promptopt_feedback.md)
-for the design rationale.
 
 ---
 
@@ -180,6 +180,8 @@ Focus on missing-key errors — they account for 100% of the deficit shown.
 ```
 
 ### Example 3 — Extraneous dict key (`key_remove`)
+
+Reuses the `aligner` (and schema) from Example 2.
 
 ```python
 print(aligner.feedback({"a": "x"}, {"a": "x", "b": 1}).text)
@@ -549,103 +551,29 @@ mode, the outermost imperfect node emits the op. Use
 
 ## API reference
 
-### `ObjectAligner.feedback(gold, pred, *, top_k=5, min_score_delta=0.0, style=None, include_synthesis_line=True, include_metadata=False, dominant_fraction_threshold=None, granularity="leaf", skip_validation=False) -> FeedbackResult`
+Canonical signatures, parameter descriptions, and field tables live in
+[`api.md`](api.md). This section only points into them and documents the
+feedback-specific surface (template keys, style presets) that has no
+natural home there.
 
-Render prompt-optimizer feedback for `(gold, pred)`. Aligns once
-internally; never invokes an LLM. Validates `gold` (raises on invalid
-schema); validates `pred` (returns a degenerate result with `score=0.0`
-and a rendered validation-error message as `text`).
-
-- **`top_k`** — maximum number of entries to render. `None` = unlimited.
-  `0` renders the `feedback.empty` template only.
-- **`min_score_delta`** — drop ops with `score_delta` strictly below this
-  value. Default `0.0` keeps every positive-delta op.
-- **`style`** — `"gepa"` (default), `"compact"`, or `"json"`. `None`
-  resolves to the instance default set at construction.
-- **`include_synthesis_line`** — append the trailing synthesis sentence.
-  Default `True`.
-- **`include_metadata`** — populate `FeedbackResult.error_breakdown`
-  with the per-op-kind delta sum.
-- **`dominant_fraction_threshold`** — threshold above which the
-  single-dominant synthesis line fires. `None` resolves to the instance
-  default (`0.60` by default).
-- **`granularity`** — passed through to `repair()`: `"leaf"` (default),
-  `"subtree"`, or `"all"`.
-- **`skip_validation`** — bypass JSON-schema validation.
-
-### `ObjectAligner.feedback_from_match(match_tree, gold, pred, mappings=None, *, ...)`
-
-Same as `feedback()` but skips re-alignment. `mappings` is the
-`ctx.current_mappings` dict from the align-time context (needed only
-for `ref_fix` ops). All other kwargs match `feedback()`.
-
-### `render_feedback(repair_result, *, top_k=5, min_score_delta=0.0, style="gepa", include_synthesis_line=True, include_metadata=False, templates=None, value_formatter=None, dominant_fraction_threshold=0.60) -> FeedbackResult`
-
-The low-level functional entry point. Takes an already-computed
-`RepairResult`. Equivalent to what `feedback()` does after alignment.
-Use this when you have a cached `RepairResult` or want to render the
-same repair in multiple styles without re-walking.
-
-### `load_templates_from_toml(path) -> dict[str, str]`
-
-Load templates from a user-supplied TOML file (see
-[Example 9.5](#example-95--loading-templates-from-a-toml-file)). Returns
-a flat `{template_key: template_string}` dict suitable for passing as
-`feedback_templates=` or `reasoning_templates=`. Accepts both `Path`
-and `str`. Validates TOML syntax and value types here; placeholder /
-key-name validation happens when `ObjectAligner(...)` consumes the
-dict. Raises `FileNotFoundError`, `tomllib.TOMLDecodeError`, or
-`TypeError` on bad input.
-
-### Constructor kwargs
-
-- **`generate_feedback`** (default `False`) — instance default for
-  `metric(generate_feedback=...)`.
-- **`feedback_templates`** (default `None`) — user template overrides;
-  validated at construction time.
-- **`feedback_style`** (default `"gepa"`) — instance default for
-  `feedback(style=...)`.
-- **`dominant_fraction_threshold`** (default `0.60`) — instance default
-  for the synthesis-line dominant-fraction threshold.
-
-### `metric(..., generate_feedback=None)`
-
-- `None` — resolves to `generate_feedback_default` set at construction.
-- `False` — no `"feedback"` key in the result.
-- `True` — `result["feedback"]` is a `str`.
-- `"full"` — `result["feedback"]` is a `dict` (same shape as
-  `FeedbackResult.to_dict()`).
-- Anything else — `ValueError`.
-
-### `FeedbackResult` fields
-
-| Field | Type | Notes |
-|---|---|---|
-| `score` | `float` | The underlying alignment score. |
-| `text` | `str` | Rendered top-K text. Empty in `"json"` style. |
-| `entries` | `tuple[FeedbackEntry, ...]` | Per-op records (including silenced ones). |
-| `style` | `str` | The style preset actually used. |
-| `truncated` | `bool` | `True` iff some op was filtered out by `top_k` or `min_score_delta`. |
-| `n_total_ops` | `int` | Total ops in the source `RepairResult`. |
-| `error_breakdown` | `dict[str, float]` | Sum of `score_delta` by `op_kind`, populated only when `include_metadata=True`. |
-
-`FeedbackResult` is iterable and indexable over its `entries`, and
-`str(fb) == fb.text`. Call `.to_dict()` for a basic-types dict.
-
-### `FeedbackEntry` fields
-
-| Field | Type | Notes |
-|---|---|---|
-| `rank` | `int` | 1-based visible rank. Silenced entries (e.g. default `key_rename_remove`) inherit the rank of their paired add. |
-| `op_kind` | `str` | Mirrors `RepairOp.kind`. |
-| `op` | `str` | `"add"` / `"remove"` / `"replace"`. |
-| `path` | `str` | JSON Pointer to the offending location. |
-| `score_delta` | `float` | `[0, 1-S]`. |
-| `score_delta_pct` | `float` | `100 * score_delta`. |
-| `gold` | `Any` | Gold value at the location (or `None`). |
-| `pred` | `Any` | Pred value at the location (or `None`). |
-| `text` | `str` | Rendered line; `""` for silenced or `"json"`-style entries. |
-| `pair_id` | `str` | Set for `key_rename_*` pairs; otherwise `""`. |
+- [`ObjectAligner.feedback()`](api.md#objectalignerfeedback) — renders
+  the top-K prescriptive feedback string. Aligns once internally; no
+  LLM.
+- [`ObjectAligner.feedback_from_match()`](api.md#objectalignerfeedback_from_match)
+  — same emission logic against an already-computed match tree.
+- [`render_feedback()`](api.md#render_feedback) — low-level functional
+  entry; takes an already-computed `RepairResult`.
+- [`load_templates_from_toml()`](api.md#load_templates_from_toml) — for
+  large or translated template sets.
+- [`FeedbackResult`](api.md#feedbackresult) and
+  [`FeedbackEntry`](api.md#feedbackentry) — result types. Iterable and
+  indexable over `entries`; `str(result) == result.text`; call
+  `.to_dict()` for a basic-types dict.
+- Constructor kwargs `generate_feedback`, `feedback_templates`,
+  `feedback_style`, `dominant_fraction_threshold`, and the per-call
+  `metric(generate_feedback=...)` override (`None` / `False` / `True` /
+  `"full"`) — see [`ObjectAligner`](api.md#objectaligner) and
+  [`ObjectAligner.metric()`](api.md#objectalignermetric).
 
 ### Template keys
 
@@ -730,19 +658,12 @@ point an optimizer will truncate it.
 
 ---
 
-## Future work
+## See also
 
-These are recorded for transparency; not committed work:
+- [`repair.md`](repair.md) — the structured op list this feedback rides on.
+- [`attribution.md`](attribution.md) — per-path deficit decomposition.
+- [`reasoning.md`](reasoning.md) — narrative walk of the match tree.
+- [`metric.md`](metric.md) — the surrounding evaluation call.
+- [`api.md`](api.md) — generated API reference.
 
-- **DSPy / GEPA adapter modules** (`object_aligner.dspy`,
-  `object_aligner.gepa`) as optional installs
-  (`pip install object-aligner[dspy]`). Thin wrappers exposing
-  `feedback()` through each framework's `Metric` / `Reflector`
-  callable contract. See
-  [`research/opus47_promptopt_feedback.md`](../research/opus47_promptopt_feedback.md) §6.
-- **`experiments/dspy_gepa_demo.py`** — a runnable demo comparing
-  DSPy + OA feedback vs DSPy + LLM-judge rationale, the empirical
-  centerpiece referenced in the research document.
-- **`"verbose"` style preset** — additionally includes the metric name
-  (`jaro`, `invdiff`) and the α-weight chain that produced each
-  contribution. Useful for ablation work; not default.
+[← Documentation home](index.md)

@@ -1,5 +1,7 @@
 # 4. Dictionaries & Objects
 
+[Docs](index.md) › Dictionaries & Objects
+
 Object Aligner matches dictionaries by **aligning keys first**, then recursively aligning the corresponding values. The key alignment uses the Hungarian algorithm to find the best pairing between gold keys and predicted keys — just like reorder alignment for lists.
 
 The result is a `MatchDict` with a `score` and a `children` dict that maps **key-level** `MatchItem`s to **value-level** match objects.
@@ -201,3 +203,15 @@ These contribute negatively to both the key score and the value score.
 | `keyImportance` | float | `1.0` | Weight of key score in the final dict score |
 | `valueImportance` | float | `1.0` | Weight of value score in the final dict score |
 | *(in properties)* `valueWeight` | float | `1.0` | Relative weight of this property's value |
+
+---
+
+## See also
+
+- [`lists.md`](lists.md) — the sister array type.
+- [`nesting.md`](nesting.md) — real-world composite examples.
+- [`referential.md`](referential.md) — using `idScope` / `ref` inside dicts.
+- [`schema_reference.md`](schema_reference.md) — every supported keyword.
+- [`api.md`](api.md) — generated API reference.
+
+[← Documentation home](index.md)

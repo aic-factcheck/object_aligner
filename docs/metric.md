@@ -1,17 +1,17 @@
 # 6. The Metric Function
 
-While `align()` gives you the raw match tree, `metric()` is the high-level API designed for evaluation pipelines. It combines schema validation, alignment, and optional human-readable explanation into a single call.
+[Docs](index.md) › The Metric Function
+
+While `align()` gives you the raw match tree, `metric()` is the high-level API
+designed for evaluation pipelines. It combines schema validation, alignment,
+and optional human-readable explanation into a single call.
 
 ---
 
 ## Signatures
 
 ```python
-aligner = ObjectAligner(
-    schema,
-    generate_reasoning=False,
-    reasoning_templates=None,
-)
+aligner = ObjectAligner(schema)
 
 result = aligner.metric(gold, pred, debug=False, generate_reasoning=None)
 ```
@@ -23,7 +23,10 @@ result = aligner.metric(gold, pred, debug=False, generate_reasoning=None)
 | `gold` | any | *(required)* | Ground truth object |
 | `pred` | any | *(required)* | Predicted object |
 | `debug` | bool | `False` | If `True`, include a structured `"debug"` alignment tree made only of basic Python container/scalar types |
-| `generate_reasoning` | `bool | None` | `None` | Per-call override. `None` uses the constructor default. |
+| `generate_reasoning` | `bool \| None` | `None` | Per-call override for the constructor default. See [`reasoning.md`](reasoning.md). |
+
+`metric()` also accepts `generate_feedback` for the prompt-optimizer feedback
+string — see [`feedback.md`](feedback.md).
 
 ### Return value
 
@@ -31,12 +34,6 @@ By default, `metric()` returns only a score:
 
 ```python
 {"score": 0.87}
-```
-
-When reasoning is enabled, it returns:
-
-```python
-{"score": 0.87, "reasoning": "..."}
 ```
 
 When `debug=True`, it also includes a structured alignment tree:
@@ -52,37 +49,22 @@ When `debug=True`, it also includes a structured alignment tree:
 }
 ```
 
----
-
-## Enabling reasoning
-
-### Constructor default
-
-```python
-from object_aligner import ObjectAligner
-
-aligner = ObjectAligner(schema, generate_reasoning=True)
-result = aligner.metric(gold, pred)
-print(result["reasoning"])
-```
-
-### Per-call override
-
-```python
-aligner = ObjectAligner(schema)
-
-aligner.metric(gold, pred)  # {"score": ...}
-aligner.metric(gold, pred, generate_reasoning=True)  # includes reasoning
-```
+When `generate_reasoning=True` (or the constructor default is set), the
+returned dict additionally contains a `"reasoning"` key with a plain-English
+explanation of the alignment. The full chapter, including the rendering
+model, every template key, and 10+ worked examples, is
+[`reasoning.md`](reasoning.md).
 
 ---
 
 ## Schema validation
 
-Before alignment, `metric()` validates **both** `gold` and `pred` against the schema using `jsonschema.validate`:
+Before alignment, `metric()` validates **both** `gold` and `pred` against the
+schema using `jsonschema.validate`:
 
 1. **Gold must pass validation** — if it doesn't, a `ValidationError` is raised.
-2. **If pred fails validation** — the function catches the `ValidationError` and returns immediately with score `0.0`.
+2. **If pred fails validation** — the function catches the `ValidationError`
+   and returns immediately with score `0.0`.
 
 ### Validation failure shape
 
@@ -92,14 +74,8 @@ With reasoning disabled:
 {"score": 0.0}
 ```
 
-With reasoning enabled:
-
-```python
-{
-    "score": 0.0,
-    "reasoning": 'JSON Schema validation failed for path="/some/path". Error message: ...'
-}
-```
+With reasoning enabled, the reasoning string carries the validation error
+message — see [`reasoning.md`](reasoning.md#validation-errors).
 
 ### Example: Validation failure
 
@@ -122,95 +98,12 @@ result = aligner.metric(
     pred={"name": "Alice"},
 )
 print(result)  # {"score": 0.0}
-
-result = aligner.metric(
-    gold={"name": "Alice", "age": 30},
-    pred={"name": "Alice"},
-    generate_reasoning=True,
-)
-print(result["reasoning"])
 ```
 
-> **Note:** The schema you pass to `ObjectAligner` can use standard JSON Schema keywords (`required`, `additionalProperties`, `minItems`, etc.) for validation. Only the custom keywords (`score`, `threshold`, `order`, etc.) affect alignment behavior.
-
----
-
-## Reasoning format
-
-The reasoning string explains the alignment in plain English and uses indentation to show nesting depth.
-
-### Perfect match
-
-```
-The predicted output perfectly matches the gold.
-```
-
-### Imperfect match
-
-```
-The predicted output scores overall 72%, let us align the predicted output to the gold and analyze the differences:
-  KEY = The predicted key "b" exactly matches the gold.
-  VALUE = The predicted list scores 75%:
-    The predicted value "3" exactly matches the gold.
-    The predicted value "5" does not match the gold "4" (score=50%).
-```
-
-### Common built-in messages
-
-- Item mismatch: `The predicted value "X" does not match the gold "Y" (score=67%).`
-- List excess: `The predicted list item "X" is excessive, it was not in the gold.`
-- List missing: `The predicted output misses the "X" list item from the gold.`
-- Dict key mismatch: `KEY = The predicted key "X" does not match the gold "Y" (score=92%).`
-
----
-
-## Template customization
-
-You can override selected built-in reasoning strings with `reasoning_templates`.
-
-```python
-aligner = ObjectAligner(
-    schema,
-    generate_reasoning=True,
-    reasoning_templates={
-        "metric.perfect": "Perfect match.",
-        "item.mismatch": 'Predicted "{pred}" vs gold "{gold}" ({score_pct}).\n',
-    },
-)
-```
-
-Overrides are **partial**: any template you do not provide keeps its default value.
-
-Unknown template keys raise an error so typos are caught early.
-
-### Stable template keys
-
-- `metric.perfect`
-- `metric.imperfect_intro`
-- `item.match`
-- `item.mismatch`
-- `list.match`
-- `list.mismatch`
-- `list.excess`
-- `list.missing`
-- `dict.match`
-- `dict.mismatch`
-- `dict.key.match`
-- `dict.key.mismatch`
-- `dict.value.prefix`
-- `validation.error`
-
-### Common placeholders
-
-Depending on the template, these placeholders are available:
-
-- `indent`
-- `gold`
-- `pred`
-- `score`
-- `score_pct`
-- `path`
-- `message`
+> **Note:** The schema you pass to `ObjectAligner` can use standard JSON
+> Schema keywords (`required`, `additionalProperties`, `minItems`, etc.) for
+> validation. Only the custom keywords (`score`, `threshold`, `order`, etc.)
+> affect alignment behavior.
 
 ---
 
@@ -256,9 +149,6 @@ examples = [
 for i, (gold, pred) in enumerate(examples, start=1):
     result = aligner.metric(gold, pred)
     print(f"Example {i}: score={result['score']:.2f}")
-    if result["score"] < 1.0:
-        verbose = aligner.metric(gold, pred, generate_reasoning=True)
-        print(verbose["reasoning"])
     print()
 ```
 
@@ -269,7 +159,22 @@ for i, (gold, pred) in enumerate(examples, start=1):
 | Feature | `align()` | `metric()` |
 |---------|-----------|------------|
 | Schema validation | Optional (`skip_validation`) | Always (pred failure → score 0) |
-| Return type | Match object (`MatchItem`/`MatchList`/`MatchDict`) | `{"score": float}` or `{"score": float, "reasoning": str}` |
+| Return type | Match object (`MatchItem`/`MatchList`/`MatchDict`) | `{"score": float}` (+ optional `reasoning`, `feedback`, `debug` keys) |
 | Use case | Programmatic access to alignment tree | Evaluation & reporting |
 
-Use `align()` when you need to inspect or traverse the match tree programmatically. Use `metric()` when you want a ready-to-log score, and optionally a built-in explanation.
+Use `align()` when you need to inspect or traverse the match tree
+programmatically. Use `metric()` when you want a ready-to-log score, and
+optionally a built-in explanation.
+
+---
+
+## See also
+
+- [`reasoning.md`](reasoning.md) — the `generate_reasoning` feature in full.
+- [`feedback.md`](feedback.md) — `metric(generate_feedback=...)` and the
+  prescriptive feedback string for prompt-optimizer reflection slots.
+- [`attribution.md`](attribution.md) — per-path decomposition of the deficit
+  $1 - S$.
+- [`api.md`](api.md) — generated API reference for `ObjectAligner.metric`.
+
+[← Documentation home](index.md)

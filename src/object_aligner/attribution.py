@@ -3,9 +3,8 @@
 Walks a match tree returned by ``ObjectAligner.align()`` and produces a ranked
 per-path decomposition of the score deficit ``(1 - S)``.
 
-The math is worked out in ``research/opus47_per-property_score_attribution.md``.
-In short: every internal node's score is a convex combination of its
-children's scores under the chosen Hungarian/DP assignment, so
+Every internal node's score is a convex combination of its children's
+scores under the chosen Hungarian/DP assignment, so
 
     S = sum_L c_L * s_L,
     1 - S = sum_L c_L * (1 - s_L),
@@ -33,9 +32,23 @@ _VALID_GRANULARITIES = ("leaf", "subtree", "all")
 class AttributionEntry:
     """One row of an attribution result.
 
-    ``contribution`` is positive: the size of the deficit attributable to this
+    `contribution` is positive: the size of the deficit attributable to this
     path under the fixed-assignment view. Sort descending to surface the
     biggest losers first.
+
+    Attributes:
+        path: RFC 6901 JSON Pointer locating the node in the gold tree.
+        score: Local similarity in `[0, 1]` at this node.
+        weight: Accumulated weight along the root-to-node path.
+        contribution: Share of the overall deficit `1 - S` owed to this
+            node, equal to `weight * (1 - score)`.
+        gold: Gold value at this node (or sentinel for missing positions).
+        pred: Predicted value at this node (or sentinel).
+        is_leaf: `True` if this row is a leaf (vs. a subtree rollup).
+        leaf_kind: For leaves, `"item"` / `"ref"` / `"id"` / `""`.
+        node_kind: For non-leaves, the match-node kind passed through to
+            attribution consumers.
+        part: `"key"` or `"value"` for dict-child rows; otherwise `"value"`.
     """
 
     path: str
@@ -52,7 +65,22 @@ class AttributionEntry:
 
 @dataclass(frozen=True)
 class AttributionResult:
-    """Result of a single ``attribute()`` call."""
+    """Result of a single `attribute()` call.
+
+    Iterable: `for entry in result: ...` yields `AttributionEntry`s in rank
+    order. Indexable: `result[0]` is the highest-contribution row.
+
+    Attributes:
+        score: Overall similarity in `[0, 1]` (i.e. the value
+            `metric()` would return).
+        entries: Ranked tuple of `AttributionEntry` rows.
+        granularity: `"leaf"`, `"subtree"`, or `"all"` — controls what
+            kind of rows are emitted.
+        total_contribution: Sum of entry contributions. For
+            `granularity="leaf"` this equals `1 - score` up to `residual`.
+        residual: `total_contribution - (1 - score)`. For `"leaf"`,
+            non-zero values reflect filtered empty positions.
+    """
 
     score: float
     entries: tuple = field(default_factory=tuple)
@@ -99,21 +127,32 @@ def tree_walk_attribution(
 ) -> AttributionResult:
     """Decompose a match tree's deficit into per-path contributions.
 
-    Parameters
-    ----------
-    match_tree
-        Root ``MatchItem`` / ``MatchList`` / ``MatchDict`` from ``align()``.
-    schema
-        The schema that produced ``match_tree``. Needed to resolve
-        ``valueWeight`` / ``ignoreExcess`` / ``ignoreMissing`` / ``prefixWeights`` etc.
-    granularity
-        ``"leaf"`` (default), ``"subtree"``, or ``"all"`` — see module docstring.
-    include_empty_positions
-        When False (default), dual-None prefix sentinels are filtered out of
-        the entry list. Their summed contribution then shows up as ``residual``.
-    sort
-        When True (default), the returned entries are sorted by
-        ``contribution`` descending.
+    Implements the tree-walk attribution algorithm (exact under the
+    assignment that `align()` produced). See
+    [`docs/attribution.md`](../attribution.md) for examples.
+
+    Args:
+        match_tree: Root `MatchItem` / `MatchList` / `MatchDict` from
+            `align()`.
+        schema: The schema that produced `match_tree`. Needed to resolve
+            `valueWeight` / `ignoreExcess` / `ignoreMissing` /
+            `prefixWeights` and similar keywords.
+        granularity: `"leaf"` (default), `"subtree"`, or `"all"`. `"leaf"`
+            decomposes only down to primitive nodes; `"subtree"` emits
+            roll-up rows for non-leaf nodes; `"all"` emits both.
+        include_empty_positions: When `False` (default), dual-None prefix
+            sentinels are filtered out of the entry list. Their summed
+            contribution shows up in `residual`.
+        sort: When `True` (default), entries are returned sorted by
+            `contribution` descending.
+
+    Returns:
+        `AttributionResult` whose `entries` rank paths by per-path
+        contribution.
+
+    Raises:
+        ValueError: If `granularity` is not one of `"leaf"` / `"subtree"`
+            / `"all"`.
     """
     if granularity not in _VALID_GRANULARITIES:
         raise ValueError(

@@ -1,5 +1,7 @@
 # 1. Concepts & Architecture
 
+[Docs](index.md) › Concepts & Architecture
+
 ## The Big Picture
 
 Object Aligner compares two structured objects — a **gold** (ground truth) and a **pred** (prediction) — and returns a similarity score between 0 and 1, plus optional explanation of how they differ.
@@ -44,7 +46,7 @@ Every alignment result is wrapped in one of three frozen dataclasses:
 All scores are in **[0, 1]** where 1.0 means perfect match.
 
 ```python
-from object_aligner.object_aligner import MatchItem, MatchList, MatchDict
+from object_aligner import MatchItem, MatchList, MatchDict
 
 # A single primitive match
 m = MatchItem(score=0.87, gold="hello", pred="hallo")
@@ -109,3 +111,13 @@ Every branch is **recursive**: a list of dicts of lists will be handled naturall
 | `similarity_string_jaro(a, b)` | Jaro normalized similarity between two strings |
 | `path2str(p)` | Converts an alignment path (list of keys/indices) to a readable string |
 | `to_pct_str(v)` | Formats a fraction as a percentage string, e.g. `"87%"` |
+
+---
+
+## See also
+
+- [`primitives.md`](primitives.md) — string, number, and boolean leaves.
+- [`schema_reference.md`](schema_reference.md) — every supported keyword.
+- [`api.md`](api.md) — generated API reference.
+
+[← Documentation home](index.md)

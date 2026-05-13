@@ -1,5 +1,7 @@
 # 9. Per-Property Score Attribution
 
+[Docs](index.md) › Per-Property Score Attribution
+
 `metric()` and `align()` answer *how well* a prediction matches the gold. **`attribute()`** answers a different question: *where exactly is the deficit, and how big is each piece?*
 
 Given the same `(gold, pred)` you'd feed into `metric()`, `attribute()` returns a ranked, path-keyed decomposition of $1 - S$ — one entry per schema-relevant location, sorted by how much of the deficit lives there.
@@ -82,17 +84,19 @@ $$
 \;}
 $$
 
-Object Aligner exposes this directly: each `AttributionEntry` has a `weight` ($c_w$) and a `contribution` ($c_w \cdot (1 - s_w)$). The full math derivation lives in `research/opus47_per-property_score_attribution.md`.
+Object Aligner exposes this directly: each `AttributionEntry` has a `weight` ($c_w$) and a `contribution` ($c_w \cdot (1 - s_w)$).
 
 ---
 
-## Examples
+## Shared setup for the examples
 
-Every code block below was executed; numbers in the output are real.
-
-The examples share a tiny printing helper that renders an `AttributionResult` the way the outputs are formatted in this chapter — header line plus one row per entry, with markers for key/id/ref/subtree entries:
+Every code block below was executed; numbers in the output are real. The
+examples share an import and a tiny printing helper, defined once here and
+reused throughout:
 
 ```python
+from object_aligner import ObjectAligner
+
 def show(result):
     header = f"score = {result.score:.4f}   deficit = {1 - result.score:.4f}"
     if abs(result.residual) > 1e-9:
@@ -110,7 +114,12 @@ def show(result):
         print(f"  {path:22s} score={e.score:.3f}  weight={e.weight:.3f}  contrib={e.contribution:.4f}{marker}")
 ```
 
-Each example below ends with `show(r)`; reuse the helper or print whatever fields you care about — `AttributionEntry` is a plain frozen dataclass. (A few examples have very long output and are truncated for readability — the helper itself prints every entry.)
+Each example below builds its own schema inline (the chapter walks through
+a different shape per example) but reuses `ObjectAligner` and `show` from
+this block. (A few examples have very long output and are truncated for
+readability — the helper itself prints every entry.)
+
+## Examples
 
 ### Example 1 — A single primitive
 
@@ -496,13 +505,19 @@ The sentinel reappears and the invariant is exact to float precision.
 
 ## API reference
 
-### `ObjectAligner.attribute(gold, pred, *, granularity="leaf", include_empty_positions=False, skip_validation=False) -> AttributionResult`
+Canonical signatures, parameter descriptions, and field tables live in
+[`api.md`](api.md). This section only links into them and documents the
+chapter-specific tables (granularity modes) that have no natural home there.
 
-Runs `align()` and walks the resulting match tree. Validates inputs against the schema (unless `skip_validation=True`). If `pred` fails validation, returns an empty result with `score=0.0` — mirroring `metric()`.
-
-### `ObjectAligner.attribute_from_match(match_tree, *, granularity="leaf", include_empty_positions=False) -> AttributionResult`
-
-Skips the alignment step. Use when you've already called `align()` and want attribution over the same tree without re-running.
+- [`ObjectAligner.attribute()`](api.md#objectalignerattribute) — runs
+  `align()` then walks the match tree.
+- [`ObjectAligner.attribute_from_match()`](api.md#objectalignerattribute_from_match)
+  — same walk against a pre-computed match tree.
+- [`tree_walk_attribution()`](api.md#tree_walk_attribution) — low-level
+  functional entry; takes a `MatchItem` / `MatchList` / `MatchDict` directly.
+- [`AttributionEntry`](api.md#attributionentry) and
+  [`AttributionResult`](api.md#attributionresult) — result types. Iterable
+  and indexable over `entries`.
 
 ### Granularity modes
 
@@ -512,35 +527,9 @@ Skips the alignment step. Use when you've already called `align()` and want attr
 | `"subtree"` | every internal node | **No** — entries are nested; treat each as a stand-alone "deficit attributable to this subtree." |
 | `"all"` | leaves *and* internals | No — same caveat as `"subtree"`. The `is_leaf` field on each entry separates the two. |
 
-### `AttributionEntry` fields
-
-| Field | Type | Meaning |
-|---|---|---|
-| `path` | `str` | JSON Pointer (RFC 6901). Root = `""`. |
-| `score` | `float` | $s_w$ at this node. |
-| `weight` | `float` | Effective weight $c_w$. For leaves, $\sum c_L = 1$. |
-| `contribution` | `float` | $c_w \cdot (1 - s_w)$, always $\ge 0$. |
-| `gold`, `pred` | `Any` | The raw gold and pred values at this leaf (None for internals or synthetic leaves). |
-| `is_leaf` | `bool` | `True` for `MatchItem` and synthetic D=0 leaves; `False` for internal subtree summaries. |
-| `leaf_kind` | `str` | `""`, `"id"`, or `"ref"` — the underlying `MatchItem.kind` for leaves. |
-| `node_kind` | `str` | `"list:reorder"` / `"list:fixed"` / `"list:prefix"` / `"list:combined"` / `"dict"` for internals; `""` for leaves. |
-| `part` | `str` | `"value"` (default) or `"key"` (dict-key leaves when `keyImportance > 0`). |
-
-### `AttributionResult` fields
-
-| Field | Type | Meaning |
-|---|---|---|
-| `score` | `float` | Root score $S$. |
-| `entries` | `tuple[AttributionEntry, ...]` | Sorted by `contribution` descending. |
-| `granularity` | `str` | The mode the caller requested. |
-| `total_contribution` | `float` | Sum of `entry.contribution` over `entries`. |
-| `residual` | `float` | `total_contribution - (1 - score)`. ~0 for leaf mode with `include_empty_positions=True`. Non-zero otherwise (filtered sentinels; non-antichain subtree mode). |
-
-`AttributionResult` is iterable and indexable — `for e in result` and `result[0]` both work.
-
 ---
 
-## Caveats and what comes next
+## Caveats
 
 ### The fixed-assignment view
 
@@ -550,8 +539,13 @@ What it *cannot* see: if a perturbation flipped the Hungarian's optimal pairing 
 
 In practice this is fine — and arguably preferable — for prompt-optimizer feedback: a single conservative direction ("fix the year extractor first") is more actionable than a fragile exact gradient. But it does mean the tree-walk number is not directly comparable to the *counterfactual* gain you'd see by actually rewriting the prediction at that path.
 
-For the math behind which schema features cause tree-walk and counterfactual to diverge, see `research/opus47_per-property_score_attribution.md` §2.5 (current features that can trigger divergence) and §4 (the Hungarian "re-pairing surprise" worked through in detail).
+---
 
-### Future: counterfactual mode
+## See also
 
-The API leaves room for a future `mode="counterfactual"` that re-runs `align()` with each leaf temporarily patched to perfect. That mode trades cost for exact deltas — and surfaces a non-zero `residual` reflecting Hungarian re-pairings — without changing the public surface. Stay tuned.
+- [`metric.md`](metric.md) — the surrounding evaluation call.
+- [`repair.md`](repair.md) — ranked structured repair ops over the same tree.
+- [`feedback.md`](feedback.md) — prompt-optimizer-shaped projection.
+- [`api.md`](api.md) — generated API reference.
+
+[← Documentation home](index.md)

@@ -46,11 +46,13 @@ The older `ObjectAligner("name", schema)` form and `get_name()` have been remove
 | 4 | [Dictionaries & Objects](dicts.md) | Key matching, value matching, importance weights |
 | 5 | [Nesting & Complex Structures](nesting.md) | Deeply nested data, real-world composite examples |
 | 6 | [The Metric Function](metric.md) | End-to-end evaluation with validation and optional reasoning |
-| 7 | [Referential Alignment](referential.md) | Matching graphs and multi-graphs whose ids are arbitrary handles |
-| 8 | [Schema Reference](schema_reference.md) | Complete reference of all schema keywords |
-| 9 | [Per-Property Score Attribution](attribution.md) | Decompose the deficit into ranked per-path contributions |
-| 10 | [Scored JSON-Patch Repair](repair.md) | Ranked structured repair operations with estimated score deltas |
-| 11 | [Prompt-Optimizer Feedback](feedback.md) | Top-K ranked prescriptive feedback strings for optimizer reflection slots |
+| 7 | [Plain-English Reasoning](reasoning.md) | Human-readable walk of the alignment tree (`generate_reasoning`) |
+| 8 | [Referential Alignment](referential.md) | Matching graphs and multi-graphs whose ids are arbitrary handles |
+| 9 | [Schema Reference](schema_reference.md) | Complete reference of all schema keywords |
+| 10 | [Per-Property Score Attribution](attribution.md) | Decompose the deficit into ranked per-path contributions |
+| 11 | [Scored JSON-Patch Repair](repair.md) | Ranked structured repair operations with estimated score deltas |
+| 12 | [Prompt-Optimizer Feedback](feedback.md) | Top-K ranked prescriptive feedback strings for optimizer reflection slots |
+| 13 | [API Reference](api.md) | Generated reference of the public Python surface |
 
 ## Installation
 

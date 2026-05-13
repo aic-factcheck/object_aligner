@@ -1,5 +1,7 @@
 # 3. Lists & Arrays
 
+[Docs](index.md) › Lists & Arrays
+
 Lists are the most feature-rich type in Object Aligner. They support three alignment strategies — **prefix**, **fixed order**, and **reorder (Hungarian)** — and they can be combined.
 
 All list results are wrapped in a `MatchList`, which contains an overall `score` and a list of `children` (each being a `MatchItem`, `MatchList`, or `MatchDict`).
@@ -235,3 +237,15 @@ If both flags are `true` and no items can be paired at all, the score is `0.0` f
 | `ignoreMissing` | bool | `false` | Don't penalize missing gold items |
 | `prefixImportance` | float | — | Weight for prefix score (required if both `prefixItems` and `items` present) |
 | `restImportance` | float | — | Weight for tail score (required if both `prefixItems` and `items` present) |
+
+---
+
+## See also
+
+- [`primitives.md`](primitives.md) — leaf scoring used inside list items.
+- [`dicts.md`](dicts.md) — the sister object type.
+- [`nesting.md`](nesting.md) — real-world composite examples.
+- [`schema_reference.md`](schema_reference.md) — every supported keyword.
+- [`api.md`](api.md) — generated API reference.
+
+[← Documentation home](index.md)

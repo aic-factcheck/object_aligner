@@ -1,5 +1,7 @@
 # 10. Scored JSON-Patch Repair
 
+[Docs](index.md) › Scored JSON-Patch Repair
+
 `attribute()` tells you *where* a prediction is wrong and *how much* each
 location costs. **`repair()`** takes the next step: it emits a **ranked list
 of structured operations** that, if applied to `pred`, would close some
@@ -95,14 +97,15 @@ $$
 
 ---
 
-## Examples
+## Shared setup for the examples
 
-Every code block was executed; numbers below are real.
-
-The examples share a small printing helper that formats each op with its
-kind and (when present) the `pair_id`:
+Every code block was executed; numbers below are real. The examples share
+an import and a small printing helper that formats each op with its kind
+and (when present) the `pair_id`, defined once here and reused throughout:
 
 ```python
+from object_aligner import ObjectAligner
+
 def show(result):
     header = f"score = {result.score:.4f}   deficit = {1 - result.score:.4f}"
     if abs(result.residual) > 1e-9:
@@ -118,6 +121,11 @@ def show(result):
     for note in result.notes:
         print(f"  note: {note}")
 ```
+
+Each example below builds its own schema inline but reuses `ObjectAligner`
+and `show` from this block.
+
+## Examples
 
 ### Example 1 — Primitive replace
 
@@ -207,8 +215,8 @@ be applied together). The `add`'s value is `'alice'` because the pred value
 under the noisy key was already correct.
 
 > **Why a pair instead of `move`?** v1 sticks to `add` / `remove` /
-> `replace`. RFC 6902's `move` is the idiomatic op here and will likely
-> ship as a future enhancement; see [Future work](#future-work).
+> `replace`. RFC 6902's `move` is the idiomatic op here and may ship as a
+> future enhancement.
 
 ### Example 5 — Fixed list, missing item
 
@@ -419,17 +427,21 @@ hand off to a re-extraction loop.
 
 ## API reference
 
-### `ObjectAligner.repair(gold, pred, *, granularity="leaf", min_contribution=0.0, skip_validation=False) -> RepairResult`
+Canonical signatures, parameter descriptions, and field tables live in
+[`api.md`](api.md). This section only links into them and documents the
+chapter-specific tables (granularity modes, the `kind` discriminator) that
+have no natural home there.
 
-Runs `align()` and produces a ranked list of repair ops. Validates inputs
-against the schema. If `pred` fails validation, returns an empty result
-with `score=0.0` (mirrors `metric()` / `attribute()`).
-
-### `ObjectAligner.repair_from_match(match_tree, gold, pred, mappings=None, *, granularity="leaf", min_contribution=0.0) -> RepairResult`
-
-Same emission logic, but operates on a pre-computed match tree. For schemas
-with `ref` fields, also pass the `ctx.current_mappings` dict captured at
-align time; prefer `repair()` which captures it automatically.
+- [`ObjectAligner.repair()`](api.md#objectalignerrepair) — runs `align()`
+  then emits ranked repair ops.
+- [`ObjectAligner.repair_from_match()`](api.md#objectalignerrepair_from_match)
+  — same emission against a pre-computed match tree.
+- [`generate_repairs()`](api.md#generate_repairs) — low-level functional
+  entry; takes a match tree directly.
+- [`RepairOp`](api.md#repairop) and
+  [`RepairResult`](api.md#repairresult) — result types.
+  `RepairResult.apply_to(target)` returns a deep-copied `target` with every
+  op applied. Both types are iterable and indexable over `ops`.
 
 ### Granularity modes
 
@@ -446,20 +458,7 @@ reflects the filtered contributions. Key-rename pairs (`key_rename_remove` +
 `key_rename_add` sharing a `pair_id`) are treated **atomically** — both kept
 or both dropped, gated by the `add`'s delta.
 
-### `RepairOp` fields
-
-| Field | Type | Meaning |
-|---|---|---|
-| `op` | `str` | One of `"add"` / `"remove"` / `"replace"` (RFC 6902 vocabulary). |
-| `path` | `str` | JSON Pointer (RFC 6901). `""` = root. For reorder-list ops the path points at the *list*, not an index. |
-| `score_delta` | `float` | Estimated deficit closed if this op is applied, in $[0, 1-S]$. Always $\ge 0$. |
-| `kind` | `str` | Finer discriminator — see [`kind` table](#kind-discriminator) below. |
-| `value` | `Any` | For `add`/`replace`: the value to install. None for `remove`. |
-| `gold` | `Any` | Gold-side value at this location (None where N/A). |
-| `pred` | `Any` | Pred-side value at this location (None where N/A). |
-| `pair_id` | `str` | `""` for standalone ops; non-empty (shared) for the `key_rename_remove` / `key_rename_add` pair. |
-
-#### `kind` discriminator
+### `kind` discriminator
 
 | `kind` | When emitted |
 |---|---|
@@ -476,23 +475,6 @@ or both dropped, gated by the `add`'s delta.
 | `ref_fix` | Wrong `ref` leaf. `value` is the pred-side id from the derived bijection. |
 | `subtree_replace` | Whole-subtree replacement in `granularity="subtree"` / `"all"`. |
 
-### `RepairResult` fields
-
-| Field | Type | Meaning |
-|---|---|---|
-| `score` | `float` | Root score $S$. |
-| `ops` | `tuple[RepairOp, ...]` | Sorted by `score_delta` descending. |
-| `granularity` | `str` | The mode the caller requested. |
-| `total_delta` | `float` | $\sum \mathrm{score\_delta}$. |
-| `residual` | `float` | `total_delta - (1 - score)`. ≈ 0 for `granularity="leaf"` with no `min_contribution` filter. |
-| `notes` | `tuple[str, ...]` | Human-readable diagnostics (e.g., "schema contains an `order: 'align'` list"). |
-
-`RepairResult.apply_to(target) -> Any` returns a deep-copied `target` with
-every op applied (in result order). The original `target` is unmutated.
-
-`RepairResult` is also iterable (`for op in result`) and indexable
-(`result[0]`).
-
 ---
 
 ## Caveats
@@ -507,9 +489,7 @@ the alignment is chosen by Hungarian/DP/bijection optimizers. Tree-walk
 Concretely: applying op #1 and re-running `metric()` may not produce
 exactly the score change predicted by `score_delta(op_1)` if the alignment
 shifts as a result. In the worst case, $\sum \mathrm{score\_delta}$ over
-ranked ops can exceed $1 - S$ (Cluster 1 §4.2 in
-`research/opus47_per-property_score_attribution.md` works through a
-concrete example).
+ranked ops can exceed $1 - S$.
 
 For prompt-optimizer feedback this is fine — a conservative ranking is
 more actionable than a fragile exact gradient. For sequential auto-repair
@@ -539,19 +519,13 @@ need to *apply* a complete set, choose `granularity="leaf"` (or
 
 ---
 
-## Future work
+## See also
 
-These extensions are planned but not in v1:
+- [`attribution.md`](attribution.md) — same tree-walk math, structured
+  rather than prescriptive.
+- [`feedback.md`](feedback.md) — top-K prescriptive feedback rendered from a
+  `RepairResult`.
+- [`metric.md`](metric.md) — the surrounding evaluation call.
+- [`api.md`](api.md) — generated API reference.
 
-- **`mode="exact"`.** Apply each candidate op, re-run `metric()`, and
-  surface the true score delta. Captures Hungarian re-pairing exactly;
-  one extra `align()` call per candidate. Will ship together with
-  `attribute(mode="counterfactual")` since they share the patch-and-
-  evaluate primitive. See `research/opus47_json_patch.md` §2 and §5.
-- **`move` ops.** Replace the two-op `key_rename_*` pair with a single
-  `op="move"`. Also potentially detect list-item misplacements in
-  `order: "fixed"` lists. See `research/opus47_json_patch.md` §3.1 and
-  §6.3.
-- **Greedy-exact sequential ranking.** A mode that produces a *sequence*
-  of patches whose deltas actually compose, by re-running `metric()`
-  between applications.
+[← Documentation home](index.md)

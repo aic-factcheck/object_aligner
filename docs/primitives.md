@@ -1,5 +1,7 @@
 # 2. Primitive Types
 
+[Docs](index.md) › Primitive Types
+
 Primitive types are the leaves of the alignment tree. They produce a `MatchItem` with a `score`, `gold`, and `pred` field.
 
 ## Booleans
@@ -207,3 +209,14 @@ This same mechanism can later be used for embedding-based or other semantic simi
 | `type` | string | *(required)* | Must be `"string"` |
 | `score` | string | `"jaro"` | Any built-in string score or a registered custom metric name |
 | `threshold` | float | `0.0` | Minimum score; scores below are set to `0.0` |
+
+---
+
+## See also
+
+- [`lists.md`](lists.md) — composing primitives into arrays.
+- [`dicts.md`](dicts.md) — composing primitives into objects.
+- [`schema_reference.md`](schema_reference.md) — every supported keyword.
+- [`api.md`](api.md) — generated API reference.
+
+[← Documentation home](index.md)
