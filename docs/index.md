@@ -49,6 +49,7 @@ The older `ObjectAligner("name", schema)` form and `get_name()` have been remove
 | 7 | [Referential Alignment](referential.md) | Matching graphs and multi-graphs whose ids are arbitrary handles |
 | 8 | [Schema Reference](schema_reference.md) | Complete reference of all schema keywords |
 | 9 | [Per-Property Score Attribution](attribution.md) | Decompose the deficit into ranked per-path contributions |
+| 10 | [Scored JSON-Patch Repair](repair.md) | Ranked structured repair operations with estimated score deltas |
 
 ## Installation
 

@@ -1240,6 +1240,15 @@ class ObjectAligner:
         Each call builds its own per-call context, so concurrent calls on the
         same ``ObjectAligner`` instance are safe.
         """
+        match, _ = self._align_with_ctx(g, p, skip_validation=skip_validation)
+        return match
+
+    def _align_with_ctx(self, g, p, *, skip_validation=False):
+        """Internal: return both the match tree and the per-call ``_AlignContext``.
+
+        ``repair()`` uses this to access ``ctx.current_mappings`` for ``ref_fix``
+        repair ops. The public ``align()`` discards the context.
+        """
         if type(g) is not type(p):
             raise TypeError(f"gold and pred must be the same type, got {type(g).__name__} and {type(p).__name__}")
         if not skip_validation:
@@ -1250,7 +1259,8 @@ class ObjectAligner:
             ctx.gold_ids = self._validate_referential(g)
             ctx.pred_ids = self._collect_pred_ids(p)
             ctx.current_mappings, ctx.pred_excess_ids = self._derive_id_mappings(g, p, ctx)
-        return self._align_helper(g, p, self.schema, ctx)["match"]
+        match = self._align_helper(g, p, self.schema, ctx)["match"]
+        return match, ctx
 
     def attribute(
         self,
@@ -1310,6 +1320,84 @@ class ObjectAligner:
             self.schema,
             granularity=granularity,
             include_empty_positions=include_empty_positions,
+        )
+
+    def repair(
+        self,
+        gold,
+        pred,
+        *,
+        granularity="leaf",
+        min_contribution=0.0,
+        skip_validation=False,
+    ):
+        """Emit a ranked list of scored repair ops for ``(gold, pred)``.
+
+        Each ``RepairOp`` carries an estimated ``score_delta`` — how much of
+        the deficit ``1 - S`` applying the op would close. See
+        ``docs/repair.md`` for examples and ``research/opus47_json_patch.md``
+        for the design rationale.
+
+        v1 implements the *approximate* flavor only: deltas are read from the
+        tree-walk attribution math. The *exact* flavor is planned future work.
+
+        Mirrors ``attribute()`` for validation: validates ``gold`` against the
+        schema; if ``pred`` fails validation returns an empty result with
+        ``score=0.0``.
+        """
+        from object_aligner.repair import RepairResult, generate_repairs
+
+        if not skip_validation:
+            self._validator.validate(gold)
+            try:
+                self._validator.validate(pred)
+            except ValidationError:
+                return RepairResult(
+                    score=0.0,
+                    ops=(),
+                    granularity=granularity,
+                    total_delta=0.0,
+                    residual=-1.0,
+                )
+
+        match_tree, ctx = self._align_with_ctx(gold, pred, skip_validation=True)
+        return generate_repairs(
+            match_tree,
+            self.schema,
+            gold,
+            pred,
+            ctx.current_mappings,
+            granularity=granularity,
+            min_contribution=min_contribution,
+        )
+
+    def repair_from_match(
+        self,
+        match_tree,
+        gold,
+        pred,
+        mappings=None,
+        *,
+        granularity="leaf",
+        min_contribution=0.0,
+    ):
+        """Generate repair ops from an already-computed match tree.
+
+        ``mappings`` is the ``ctx.current_mappings`` dict from the align-time
+        context, needed for ``ref_fix`` ops. If you produced ``match_tree``
+        via ``align()`` and your schema declares ``ref`` fields, prefer the
+        ``repair()`` method (which captures the mappings automatically).
+        """
+        from object_aligner.repair import generate_repairs
+
+        return generate_repairs(
+            match_tree,
+            self.schema,
+            gold,
+            pred,
+            mappings,
+            granularity=granularity,
+            min_contribution=min_contribution,
         )
 
     def metric(self, gold, pred, debug=False, generate_reasoning=None):

@@ -119,7 +119,13 @@ All branches are recursive — any nesting depth works naturally.
 - public `score` values should be plain Python `float`, not NumPy scalar types
 - `ObjectAligner(..., warn_on_ambiguous_mapping=False)` emits a `UserWarning` when id-mapping derivation has tied costs (off by default)
 - `aligner.attribute(gold, pred, *, granularity="leaf", include_empty_positions=False, skip_validation=False)` returns an `AttributionResult` decomposing the deficit into per-path contributions (tree-walk; see `docs/attribution.md`). `aligner.attribute_from_match(match_tree, ...)` skips re-alignment.
-- `MatchList.kind` is `"reorder"` / `"fixed"` / `"prefix"` / `"combined"` (default `""`); used by attribution to select the per-aggregator α schedule. Live in `src/object_aligner/attribution.py`.
+- `aligner.repair(gold, pred, *, granularity="leaf", min_contribution=0.0, skip_validation=False)` returns a `RepairResult` with ranked `RepairOp`s (RFC 6902-flavored `add`/`remove`/`replace` with `score_delta`); see `docs/repair.md`. `RepairResult.apply_to(pred)` returns a patched deep copy. `aligner.repair_from_match(match_tree, gold, pred, mappings, ...)` skips re-alignment.
+- `MatchList.kind` is `"reorder"` / `"fixed"` / `"prefix"` / `"combined"` (default `""`); used by attribution and repair to select the per-aggregator α schedule. Live in `src/object_aligner/attribution.py` and `src/object_aligner/repair.py`.
+
+## Future work / planned extensions
+
+- `mode="exact"` for `repair()` (and counterfactual mode for `attribute()`): apply each candidate op, re-run `metric()`, surface true score deltas. Shares a patch-and-evaluate primitive with Cluster 1 counterfactual — will land together. See `research/opus47_json_patch.md` §2 and §5.
+- `move` op support in `repair()` for key renames (replacing the two-op `key_rename_remove` + `key_rename_add` pair) and `kind="fixed"` list reorderings. See `research/opus47_json_patch.md` §3.1 and §6.3.
 
 ## Custom Schema Keywords (beyond JSON Schema)
 
