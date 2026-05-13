@@ -6,6 +6,10 @@ Project knowledge for AI coding assistants.
 
 - **Do not add `Co-Authored-By` trailers (or any other AI-attribution trailer) to commit messages.** Commits should carry only the human author. This applies to every commit, every time.
 
+## Documentation conventions
+
+- **Typeset equations in Markdown files with LaTeX math**: `$…$` for inline and `$$…$$` for display blocks. Do not use ASCII art, plain-text formulas, or unicode-math approximations. Renders natively in GitHub, MkDocs (`pymdownx.arithmatex`), Pandoc, and VS Code preview.
+
 ## Project Overview
 
 **object-aligner** is a Python library for computing similarity scores between structured data objects (JSON-like: dicts, lists, primitives). It aligns a "gold" (reference) object with a "predicted" object and produces a fine-grained similarity score in `[0, 1]`, with optional human-readable reasoning and optional structured debug output.
