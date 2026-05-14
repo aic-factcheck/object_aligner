@@ -21,7 +21,7 @@ chapters use to deep-link into this page.
 <!-- anchor: objectaligner -->
 
 ```python
-ObjectAligner(schema, *, custom_metrics=None, generate_description=False, description_templates=None, description_style='default', generate_feedback=False, feedback_templates=None, feedback_style='gepa', dominant_fraction_threshold=0.6, warn_on_ambiguous_mapping=False)
+ObjectAligner(schema, *, custom_metrics=None, generate_description=False, description_templates=None, description_style='default', generate_feedback=False, feedback_templates=None, feedback_style='gepa', dominant_fraction_threshold=0.6, warn_on_ambiguous_mapping=False, compute_confidence=False, confidence_method='margin', confidence_entropy_temperature=8.0)
 ```
 
 Aligns a gold object against a predicted object under a schema.
@@ -51,6 +51,9 @@ See [`docs/concepts.md`](../concepts.md) for the architectural tour.
 - **`feedback_style`** — One of the registered feedback styles (default `"gepa"`). Controls phrasing and synthesis-line shape.
 - **`dominant_fraction_threshold`** — Fraction of the deficit that one op kind must own for the feedback synthesis line to switch between the "single dominant" and "mixed" phrasings. Defaults to `0.60`.
 - **`warn_on_ambiguous_mapping`** — If `True`, emit a `UserWarning` whenever the Hungarian-derived id mapping for an `idScope` is non-unique because of tied costs. Off by default.
+- **`compute_confidence`** — If `True`, populate the `confidence` field on `MatchItem` / `MatchList` / `MatchDict` from the similarity matrix used at each Hungarian site (`order: "align"` lists and dict-key matching). Default `False` keeps `confidence == 1.0` everywhere, which preserves byte-identical output for `feedback()` and `describe()` under default flags. See [`docs/confidence.md`](../confidence.md).
+- **`confidence_method`** — `"margin"` (default) or `"entropy"`. Selects the per-pair confidence formula. Margin is a fast linear pass over the similarity matrix; entropy softmaxes each row and reports `1 - H / log m`.
+- **`confidence_entropy_temperature`** — Softmax temperature `β` used only when `confidence_method="entropy"`. Defaults to `8.0`, which puts a Jaro 0.95 vs 0.80 at roughly a 3:1 probability ratio on `[0, 1]`-bounded similarities.
 
 **Raises**
 
@@ -162,7 +165,7 @@ both `metric()` and `attribute()` outputs without aligning twice).
 <!-- anchor: objectalignerrepair -->
 
 ```python
-ObjectAligner.repair(gold, pred, *, granularity='leaf', min_contribution=0.0, skip_validation=False)
+ObjectAligner.repair(gold, pred, *, granularity='leaf', min_contribution=0.0, skip_validation=False, rank_by='score_delta', include_pairing_ambiguous=False, ambiguity_threshold=0.3)
 ```
 
 Emit a ranked list of scored repair ops for `(gold, pred)`.
@@ -179,8 +182,11 @@ See [`docs/repair.md`](../repair.md) for examples.
 - **`granularity`** — `"leaf"` (default) or subtree-level rollups.
 - **`min_contribution`** — Drop ops whose `score_delta` falls below this threshold.
 - **`skip_validation`** — If `True`, skip JSON Schema validation.
+- **`rank_by`** — Sort key for the returned ops. One of `"score_delta"` (default — current behavior), `"expected_gain"` (`score_delta × confidence`), or `"confidence"`. See [`docs/confidence.md`](../confidence.md).
+- **`include_pairing_ambiguous`** — If `True`, append a `pairing_ambiguous` diagnostic op for every Hungarian container whose `confidence` falls below `ambiguity_threshold`. Diagnostic only — not applied by `RepairResult.apply_to`. Off by default.
+- **`ambiguity_threshold`** — Confidence threshold for the `pairing_ambiguous` walker. Defaults to `0.30`.
 
-**Returns** — `RepairResult` whose `ops` is ranked by `score_delta`. If `pred` fails validation, returns an empty result with `score=0.0`.
+**Returns** — `RepairResult` whose `ops` is ranked by `rank_by`. If `pred` fails validation, returns an empty result with `score=0.0`.
 
 **Raises**
 
@@ -190,7 +196,7 @@ See [`docs/repair.md`](../repair.md) for examples.
 <!-- anchor: objectalignerrepair_from_match -->
 
 ```python
-ObjectAligner.repair_from_match(match_tree, gold, pred, mappings=None, *, granularity='leaf', min_contribution=0.0)
+ObjectAligner.repair_from_match(match_tree, gold, pred, mappings=None, *, granularity='leaf', min_contribution=0.0, rank_by='score_delta', include_pairing_ambiguous=False, ambiguity_threshold=0.3)
 ```
 
 Generate repair ops from an already-computed match tree.
@@ -203,6 +209,9 @@ Generate repair ops from an already-computed match tree.
 - **`mappings`** — The `ctx.current_mappings` dict from the align-time context, needed for `ref_fix` ops. If your schema has no `ref` fields it can be `None` or `{}`. If `match_tree` was produced by `align()` and your schema declares `ref` fields, prefer `repair()` (which captures mappings automatically).
 - **`granularity`** — See `repair()`.
 - **`min_contribution`** — See `repair()`.
+- **`rank_by`** — See `repair()`.
+- **`include_pairing_ambiguous`** — See `repair()`.
+- **`ambiguity_threshold`** — See `repair()`.
 
 **Returns** — `RepairResult` — same shape as `repair()`.
 
@@ -210,7 +219,7 @@ Generate repair ops from an already-computed match tree.
 <!-- anchor: objectalignerdescribe -->
 
 ```python
-ObjectAligner.describe(gold, pred, *, style=None, skip_validation=False)
+ObjectAligner.describe(gold, pred, *, style=None, skip_validation=False, show_confidence=False, include_ambiguous=False, ambiguity_threshold=0.3)
 ```
 
 Render a plain-English description of `(gold, pred)`.
@@ -225,6 +234,9 @@ LLM. The output is deterministic and template-driven. See
 - **`pred`** — Predicted object.
 - **`style`** — Override the constructor `description_style`. `None` defers to the instance default.
 - **`skip_validation`** — If `True`, skip JSON Schema validation.
+- **`show_confidence`** — If `True`, append a banded confidence suffix to every per-node line whose `confidence` falls below `0.70`. Requires the owning aligner to have been constructed with `compute_confidence=True`. Default preserves byte-identical output of earlier releases. See [`docs/confidence.md`](../confidence.md).
+- **`include_ambiguous`** — If `True`, emit an extra entry above every Hungarian-paired container whose `confidence` falls below `ambiguity_threshold`. Off by default.
+- **`ambiguity_threshold`** — Confidence threshold for the ambiguous-entry emission. Default `0.30`.
 
 **Returns** — `DescriptionResult` whose `text` is the rendered indented prose (or `""` in `"json"` style) and `entries` is a traversal-ordered list of `DescriptionEntry`. On validation failure of `pred`, returns a degenerate result with `score=0.0` and a rendered validation-error message as `text`.
 
@@ -236,7 +248,7 @@ LLM. The output is deterministic and template-driven. See
 <!-- anchor: objectalignerdescribe_from_match -->
 
 ```python
-ObjectAligner.describe_from_match(match_tree, *, style=None)
+ObjectAligner.describe_from_match(match_tree, *, style=None, show_confidence=False, include_ambiguous=False, ambiguity_threshold=0.3)
 ```
 
 Render a description from an already-computed match tree.
@@ -245,6 +257,9 @@ Render a description from an already-computed match tree.
 
 - **`match_tree`** — A match tree returned by `align()`.
 - **`style`** — See `describe()`.
+- **`show_confidence`** — See `describe()`.
+- **`include_ambiguous`** — See `describe()`.
+- **`ambiguity_threshold`** — See `describe()`.
 
 **Returns** — `DescriptionResult` — same shape as `describe()`.
 
@@ -252,7 +267,7 @@ Render a description from an already-computed match tree.
 <!-- anchor: objectalignerfeedback -->
 
 ```python
-ObjectAligner.feedback(gold, pred, *, top_k=5, min_score_delta=0.0, style=None, include_synthesis_line=True, include_metadata=False, dominant_fraction_threshold=None, granularity='leaf', skip_validation=False)
+ObjectAligner.feedback(gold, pred, *, top_k=5, min_score_delta=0.0, style=None, include_synthesis_line=True, include_metadata=False, dominant_fraction_threshold=None, granularity='leaf', skip_validation=False, rank_by='score_delta', include_pairing_ambiguous=False, ambiguity_threshold=0.3)
 ```
 
 Render prompt-optimizer feedback for `(gold, pred)`.
@@ -273,6 +288,9 @@ LLM. The output is deterministic and template-driven. See
 - **`dominant_fraction_threshold`** — Override the constructor threshold for switching between "single dominant" and "mixed" synthesis-line phrasing. `None` defers to the instance default.
 - **`granularity`** — See `attribute()` / `repair()`.
 - **`skip_validation`** — If `True`, skip JSON Schema validation.
+- **`rank_by`** — `"score_delta"` (default), `"expected_gain"`, or `"confidence"`. See [`docs/confidence.md`](../confidence.md). Default preserves byte-identical output of earlier releases.
+- **`include_pairing_ambiguous`** — If `True`, surface a "Diagnostic notes" trailing section listing Hungarian containers whose `confidence` fell below `ambiguity_threshold`. Off by default.
+- **`ambiguity_threshold`** — Confidence threshold for the diagnostic walker. Default `0.30`.
 
 **Returns** — `FeedbackResult` whose `text` is suitable for pasting into a DSPy / GEPA / TextGrad reflection slot. On validation failure of `pred`, returns a degenerate result with `score=0.0` and a rendered validation-error message as `text`.
 
@@ -284,7 +302,7 @@ LLM. The output is deterministic and template-driven. See
 <!-- anchor: objectalignerfeedback_from_match -->
 
 ```python
-ObjectAligner.feedback_from_match(match_tree, gold, pred, mappings=None, *, top_k=5, min_score_delta=0.0, style=None, include_synthesis_line=True, include_metadata=False, dominant_fraction_threshold=None, granularity='leaf')
+ObjectAligner.feedback_from_match(match_tree, gold, pred, mappings=None, *, top_k=5, min_score_delta=0.0, style=None, include_synthesis_line=True, include_metadata=False, dominant_fraction_threshold=None, granularity='leaf', rank_by='score_delta', include_pairing_ambiguous=False, ambiguity_threshold=0.3)
 ```
 
 Render feedback from an already-computed match tree.
@@ -302,6 +320,9 @@ Render feedback from an already-computed match tree.
 - **`include_metadata`** — See `feedback()`.
 - **`dominant_fraction_threshold`** — See `feedback()`.
 - **`granularity`** — See `feedback()`.
+- **`rank_by`** — See `feedback()`.
+- **`include_pairing_ambiguous`** — See `feedback()`.
+- **`ambiguity_threshold`** — See `feedback()`.
 
 **Returns** — `FeedbackResult` — same shape as `feedback()`.
 
@@ -313,7 +334,7 @@ Render feedback from an already-computed match tree.
 <!-- anchor: matchitem -->
 
 ```python
-MatchItem(score: float, gold: Any, pred: Any, kind: str = '') -> None
+MatchItem(score: float, gold: Any, pred: Any, kind: str = '', confidence: float = 1.0) -> None
 ```
 
 Leaf node of the alignment tree, produced for a single primitive value.
@@ -330,12 +351,13 @@ Also produced for `idScope` and `ref` primitives.
 | `gold` | `Any` | *(required)* | The gold (reference) primitive value. |
 | `pred` | `Any` | *(required)* | The predicted primitive value. |
 | `kind` | `str` | '' | `"id"` for `idScope` fields, `"ref"` for `ref` fields, `"null"` when one or both of `gold`/`pred` is `None`, and `""` otherwise. Surfaced as `"marker"` in the debug tree when non-empty. |
+| `confidence` | `float` | 1.0 | Per-pair stability score in `[0, 1]` from the enclosing Hungarian matching (key-pair confidence for keys of a `MatchDict`, item-pair confidence for items of a `MatchList` with `kind="reorder"`). `1.0` for leaves whose parent did not run a Hungarian assignment, and `1.0` for excess/missing pairs. Populated only when the owning `ObjectAligner` was constructed with `compute_confidence=True`. |
 
 ### `MatchList`
 <!-- anchor: matchlist -->
 
 ```python
-MatchList(score: float, children: list = <factory>, kind: str = '') -> None
+MatchList(score: float, children: list = <factory>, kind: str = '', confidence: float = 1.0) -> None
 ```
 
 Alignment node for a list-typed schema.
@@ -352,12 +374,13 @@ order produced by the Hungarian matching, not the original `pred` order.
 | `score` | `float` | *(required)* | Aggregate similarity in `[0, 1]`. |
 | `children` | `list` | list() → [] | Per-child match nodes (`MatchItem`, `MatchList`, or `MatchDict`) in alignment order. |
 | `kind` | `str` | '' | `"reorder"` / `"fixed"` / `"prefix"` / `"combined"` based on the list aggregator selected by the schema; `""` if not set. Consumed by attribution/repair to pick the per-aggregator α schedule. |
+| `confidence` | `float` | 1.0 | Aggregate stability score in `[0, 1]`. For `kind="reorder"` lists, the mean per-pair confidence from the Hungarian matching over matched children; for `kind="fixed"`/`"prefix"`/`"combined"` lists, the mean of child confidences. `1.0` when `compute_confidence=False`. |
 
 ### `MatchDict`
 <!-- anchor: matchdict -->
 
 ```python
-MatchDict(score: float, children: dict = <factory>) -> None
+MatchDict(score: float, children: dict = <factory>, confidence: float = 1.0) -> None
 ```
 
 Alignment node for an object-typed schema.
@@ -372,6 +395,7 @@ when the schema type is `object`. `children` maps a key match
 |-------|------|---------|-------------|
 | `score` | `float` | *(required)* | Aggregate similarity in `[0, 1]`. |
 | `children` | `dict` | dict() → {} | Mapping from a key-level `MatchItem` to the value-level match (`MatchItem`, `MatchList`, or `MatchDict`). |
+| `confidence` | `float` | 1.0 | Aggregate stability score in `[0, 1]` blending the key-pair Hungarian confidence and the value-subtree confidence using the same `keyImportance` / `valueImportance` weights used for `score`. `1.0` when `compute_confidence=False`. |
 
 ---
 
@@ -494,7 +518,7 @@ order. Indexable: `result[0]` is the highest-contribution row.
 <!-- anchor: generate_repairs -->
 
 ```python
-generate_repairs(match_tree, schema, gold, pred, mappings: 'dict | None' = None, *, granularity: 'str' = 'leaf', min_contribution: 'float' = 0.0) -> 'RepairResult'
+generate_repairs(match_tree, schema, gold, pred, mappings: 'dict | None' = None, *, granularity: 'str' = 'leaf', min_contribution: 'float' = 0.0, rank_by: 'str' = 'score_delta', include_pairing_ambiguous: 'bool' = False, ambiguity_threshold: 'float' = 0.3) -> 'RepairResult'
 ```
 
 Generate a ranked list of scored repair ops for a match tree.
@@ -511,18 +535,21 @@ math as `tree_walk_attribution`.
 - **`mappings`** — Per-scope `{gold_id: pred_id}` dict captured from the align-time `_AlignContext.current_mappings`. Required for emitting `ref_fix` ops; if `None`, no `ref_fix` ops are emitted and the walker falls back to using the raw gold ref value as the suggested replacement (less useful — pred uses arbitrary ids by convention).
 - **`granularity`** — `"leaf"` (default), `"subtree"`, or `"all"`.
 - **`min_contribution`** — Drop ops whose `score_delta` falls below this threshold. Atomic pairs are kept iff the carrying op passes.
+- **`rank_by`** — Sort key for the returned ops list. One of `"score_delta"` (default, descending by raw deficit closed), `"expected_gain"` (descending by `score_delta × confidence`), or `"confidence"` (descending by stability of the originating pairing). All three modes use the same deterministic tiebreaker `(path, op, kind)`. Default preserves byte-for- byte behavior of pre-confidence releases.
+- **`include_pairing_ambiguous`** — If `True`, walk the match tree for Hungarian-paired containers whose `confidence` falls below `ambiguity_threshold` and append a `pairing_ambiguous` op (with `score_delta = 0`) at each such path. Diagnostic only — `RepairResult.apply_to` ignores them. Off by default.
+- **`ambiguity_threshold`** — Confidence threshold for the `pairing_ambiguous` walker. Default `0.30`.
 
-**Returns** — `RepairResult` whose `ops` are ranked by `score_delta` descending.
+**Returns** — `RepairResult` whose `ops` are ranked under `rank_by`.
 
 **Raises**
 
-- **`ValueError`** — If `granularity` is not one of `"leaf"` / `"subtree"` / `"all"`.
+- **`ValueError`** — If `granularity` or `rank_by` is not one of the supported values.
 
 ### `RepairOp`
 <!-- anchor: repairop -->
 
 ```python
-RepairOp(op: 'str', path: 'str', score_delta: 'float', kind: 'str', value: 'Any' = None, gold: 'Any' = None, pred: 'Any' = None, pair_id: 'str' = '') -> None
+RepairOp(op: 'str', path: 'str', score_delta: 'float', kind: 'str', value: 'Any' = None, gold: 'Any' = None, pred: 'Any' = None, pair_id: 'str' = '', confidence: 'float' = 1.0) -> None
 ```
 
 One scored repair operation.
@@ -539,11 +566,12 @@ semantics. See [`docs/repair.md`](../repair.md) for the full
 | `op` | `str` | *(required)* | One of `"add"` / `"remove"` / `"replace"`. |
 | `path` | `str` | *(required)* | RFC 6901 JSON Pointer locating the patch site. |
 | `score_delta` | `float` | *(required)* | Positive — how much of the deficit `1 - S` applying this op would close (approximate, v1). |
-| `kind` | `str` | *(required)* | Finer discriminator (`primitive_replace`, `key_add`, `list_item_missing`, `ref_fix`, `null_value_replace`, etc.). |
+| `kind` | `str` | *(required)* | Finer discriminator (`primitive_replace`, `key_add`, `list_item_missing`, `ref_fix`, `null_value_replace`, `pairing_ambiguous`, etc.). |
 | `value` | `Any` | None | For `add` / `replace` ops, the value to write. |
 | `gold` | `Any` | None | Gold value at the patch site (informational, useful for rendering feedback). |
 | `pred` | `Any` | None | Predicted value at the patch site (informational). |
 | `pair_id` | `str` | '' | Non-empty for ops that must be applied atomically with another op (currently `key_rename_remove` + `key_rename_add` pairs). |
+| `confidence` | `float` | 1.0 | Stability score in `[0, 1]` of the alignment that produced this op, inherited from the originating match node. `1.0` for ops not derived from a Hungarian pairing, and `1.0` everywhere when `compute_confidence=False`. Used by `rank_by="expected_gain"` / `"confidence"`. |
 
 ### `RepairResult`
 <!-- anchor: repairresult -->
@@ -576,7 +604,7 @@ Indexable: `result[0]` is the highest-`score_delta` op.
 <!-- anchor: render_description -->
 
 ```python
-render_description(match_tree, *, style: 'str' = 'default', templates: 'dict | None' = None) -> 'DescriptionResult'
+render_description(match_tree, *, style: 'str' = 'default', templates: 'dict | None' = None, show_confidence: 'bool' = False, include_ambiguous: 'bool' = False, ambiguity_threshold: 'float' = 0.3) -> 'DescriptionResult'
 ```
 
 Render a match tree as a deterministic English description.
@@ -589,6 +617,9 @@ examples.
 - **`match_tree`** — A match tree returned by ``ObjectAligner.align()``.
 - **`style`** — ``"default"`` (multi-line indented prose walk of the match tree) or ``"json"`` (empty ``.text``, structured ``.entries`` only).
 - **`templates`** — User template overrides (full dict, partial dict, or ``None`` for defaults).
+- **`show_confidence`** — If ``True``, append a banded confidence suffix (e.g. ``" (low confidence 0.23)"``) to every per-node line whose confidence falls below ``0.70``. Default ``False`` preserves byte-identical output of pre-confidence releases.
+- **`include_ambiguous`** — If ``True``, emit a dedicated ``describe.list.ambiguous`` / ``describe.dict.ambiguous`` entry before walking any Hungarian-paired container whose confidence falls below ``ambiguity_threshold``. Off by default.
+- **`ambiguity_threshold`** — Confidence threshold for the ambiguous-entry emission. Default ``0.30``.
 
 **Returns** — ``DescriptionResult`` whose ``text`` is the fully rendered indented description (or ``""`` in ``"json"`` style).
 
@@ -600,7 +631,7 @@ examples.
 <!-- anchor: descriptionentry -->
 
 ```python
-DescriptionEntry(path: 'str', depth: 'int', match_kind: 'str', outcome: 'str', score: 'float', text: 'str') -> None
+DescriptionEntry(path: 'str', depth: 'int', match_kind: 'str', outcome: 'str', score: 'float', text: 'str', confidence: 'float' = 1.0) -> None
 ```
 
 One visited match-tree node plus its rendered prose line.
@@ -615,10 +646,11 @@ differentiates ``describe`` from ``feedback``).
 |-------|------|---------|-------------|
 | `path` | `str` | *(required)* | Indicative JSON Pointer at this node. For ``order: "align"`` lists the path stops at the list itself (children share the list path) because Hungarian-matched indices are not stable; for fixed/prefix lists the index is included. |
 | `depth` | `int` | *(required)* | 0-indexed nesting depth (matches the visual indent depth). |
-| `match_kind` | `str` | *(required)* | One of ``"item"``, ``"list"``, ``"dict"``, ``"key"``, ``"ref"``, ``"id"``. |
-| `outcome` | `str` | *(required)* | One of ``"match"``, ``"mismatch"``, ``"excess"``, ``"missing"``. |
+| `match_kind` | `str` | *(required)* | One of ``"item"``, ``"list"``, ``"dict"``, ``"key"``, ``"ref"``, ``"id"``, or ``"ambiguous"`` (opt-in low-confidence container marker emitted only when ``include_ambiguous=True``). |
+| `outcome` | `str` | *(required)* | One of ``"match"``, ``"mismatch"``, ``"excess"``, ``"missing"``, ``"ambiguous"``. |
 | `score` | `float` | *(required)* | Similarity in ``[0, 1]`` at this node. |
 | `text` | `str` | *(required)* | Rendered template body for this node. May be ``""`` for silenced templates (default ``describe.id.match`` / ``describe.id.mismatch`` are empty). |
+| `confidence` | `float` | 1.0 | Stability of the pairing that produced this node in ``[0, 1]``. Inherited from the originating Match node and always populated. ``1.0`` everywhere when ``compute_confidence=False`` on the owning ``ObjectAligner``. |
 
 ### `DescriptionResult`
 <!-- anchor: descriptionresult -->
@@ -644,7 +676,7 @@ result`` yields ``DescriptionEntry``s in match-tree traversal order.
 ### `DEFAULT_DESCRIPTION_TEMPLATES` (constant)
 <!-- anchor: default_description_templates-constant -->
 
-Type: `dict`. Dict with 20 keys.
+Type: `dict`. Dict with 22 keys.
 
 Default template strings live under `src/object_aligner/templates/`. Import this name and pass it (or an override dict) into `ObjectAligner(...)` to customize.
 
@@ -656,7 +688,7 @@ Default template strings live under `src/object_aligner/templates/`. Import this
 <!-- anchor: render_feedback -->
 
 ```python
-render_feedback(repair_result: 'RepairResult', *, top_k: 'int | None' = 5, min_score_delta: 'float' = 0.0, style: 'str' = 'gepa', include_synthesis_line: 'bool' = True, include_metadata: 'bool' = False, templates: 'dict | None' = None, value_formatter: 'Callable[[Any], str] | None' = None, dominant_fraction_threshold: 'float' = 0.6) -> 'FeedbackResult'
+render_feedback(repair_result: 'RepairResult', *, top_k: 'int | None' = 5, min_score_delta: 'float' = 0.0, style: 'str' = 'gepa', include_synthesis_line: 'bool' = True, include_metadata: 'bool' = False, templates: 'dict | None' = None, value_formatter: 'Callable[[Any], str] | None' = None, dominant_fraction_threshold: 'float' = 0.6, include_diagnostics: 'bool' = True) -> 'FeedbackResult'
 ```
 
 Render a `RepairResult` as a top-K ranked feedback string.
@@ -675,6 +707,7 @@ examples.
 - **`templates`** — User template overrides. May be `None` (use defaults), a partial override dict, or a fully-merged dict.
 - **`value_formatter`** — `(value) -> str` callable used to format `gold` / `pred` values in templates. Default truncates `repr(value)` to 80 chars.
 - **`dominant_fraction_threshold`** — Threshold above which the single-dominant synthesis line fires. Default `0.60`.
+- **`include_diagnostics`** — If `True` (default) and the underlying `RepairResult` contains `pairing_ambiguous` ops (only emitted when `aligner.feedback(..., include_pairing_ambiguous=True)` was used), render them as a trailing "Diagnostic notes" section. Set to `False` to suppress the section even when such ops are present.
 
 **Returns** — `FeedbackResult` whose `text` is the fully rendered top-K feedback string.
 
@@ -686,7 +719,7 @@ examples.
 <!-- anchor: feedbackentry -->
 
 ```python
-FeedbackEntry(rank: 'int', op_kind: 'str', op: 'str', path: 'str', score_delta: 'float', score_delta_pct: 'float', gold: 'Any', pred: 'Any', text: 'str', pair_id: 'str' = '') -> None
+FeedbackEntry(rank: 'int', op_kind: 'str', op: 'str', path: 'str', score_delta: 'float', score_delta_pct: 'float', gold: 'Any', pred: 'Any', text: 'str', pair_id: 'str' = '', confidence: 'float' = 1.0) -> None
 ```
 
 One rendered feedback line plus its structured backing fields.
@@ -710,6 +743,7 @@ stays contiguous. Standalone silenced entries get rank `0`.
 | `pred` | `Any` | *(required)* | Predicted value at the patch site (informational). |
 | `text` | `str` | *(required)* | Rendered template body — what the consumer prints. |
 | `pair_id` | `str` | '' | Non-empty for paired ops that must be applied together. |
+| `confidence` | `float` | 1.0 |  |
 
 ### `FeedbackResult`
 <!-- anchor: feedbackresult -->
@@ -738,7 +772,7 @@ yields `FeedbackEntry`s in visible-rank order.
 ### `DEFAULT_FEEDBACK_TEMPLATES` (constant)
 <!-- anchor: default_feedback_templates-constant -->
 
-Type: `dict`. Dict with 19 keys.
+Type: `dict`. Dict with 21 keys.
 
 Default template strings live under `src/object_aligner/templates/`. Import this name and pass it (or an override dict) into `ObjectAligner(...)` to customize.
 

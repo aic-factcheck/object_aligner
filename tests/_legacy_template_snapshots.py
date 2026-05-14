@@ -28,8 +28,14 @@ LEGACY_DESCRIBE = {
     "describe.list.mismatch": "{indent}The predicted list scores {score_pct}:\n",
     "describe.list.excess": '{indent}The predicted list item "{pred}" is excessive, it was not in the gold.\n',
     "describe.list.missing": '{indent}The predicted output misses the "{gold}" list item from the gold.\n',
+    "describe.list.ambiguous":
+        "{indent}NOTE: alignment between {n_gold} gold and {n_pred} predicted "
+        "list items was ambiguous (confidence {confidence_pct}).\n",
     "describe.dict.match": "{indent}The predicted dictionary perfectly matches the gold one:\n",
     "describe.dict.mismatch": "{indent}The predicted dictionary scores {score_pct}:\n",
+    "describe.dict.ambiguous":
+        "{indent}NOTE: dict key alignment was ambiguous "
+        "(confidence {confidence_pct}).\n",
     "describe.dict.key.match": '{indent}KEY = The predicted key "{pred}" exactly matches the gold.\n',
     "describe.dict.key.mismatch": '{indent}KEY = The predicted key "{pred}" does not match the gold "{gold}" (score={score_pct}).\n',
     "describe.dict.value.prefix": "{indent}VALUE = ",
@@ -81,6 +87,12 @@ LEGACY_FEEDBACK = {
     "feedback.op.null_value_replace":
         "{rank}. {path}: null/value mismatch (expected {gold}, got {pred}). "
         "Fixing this recovers +{score_delta:.3f}.",
+    "feedback.op.pairing_ambiguous":
+        "~ {path}: pairing between gold and predicted items was ambiguous "
+        "(confidence {confidence_pct:.0f}%). Make these items more "
+        "distinctive before fixing deeper field-level errors.",
+    "feedback.diagnostics.intro":
+        "\nDiagnostic notes (low-confidence pairings):",
     "feedback.synthesis.single_dominant":
         "\nFocus on {dominant_kind_human} errors — they account for "
         "{dominant_fraction_pct:.0f}% of the deficit shown.",
@@ -122,4 +134,6 @@ LEGACY_COMPACT = {
         "{rank}. {path}: replace subtree [+{score_delta:.3f}]",
     "feedback.op.null_value_replace":
         "{rank}. {path}: null<->{gold} (got {pred}) [+{score_delta:.3f}]",
+    "feedback.op.pairing_ambiguous":
+        "~ {path}: ambiguous pairing [c={confidence:.2f}]",
 }

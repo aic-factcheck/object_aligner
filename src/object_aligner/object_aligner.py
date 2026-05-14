@@ -27,15 +27,24 @@ class MatchItem:
             `"null"` when one or both of `gold`/`pred` is `None`, and
             `""` otherwise. Surfaced as `"marker"` in the debug tree when
             non-empty.
+        confidence: Per-pair stability score in `[0, 1]` from the
+            enclosing Hungarian matching (key-pair confidence for keys
+            of a `MatchDict`, item-pair confidence for items of a
+            `MatchList` with `kind="reorder"`). `1.0` for leaves whose
+            parent did not run a Hungarian assignment, and `1.0` for
+            excess/missing pairs. Populated only when the owning
+            `ObjectAligner` was constructed with `compute_confidence=True`.
     """
 
     score: float
     gold: Any
     pred: Any
     kind: str = ""
+    confidence: float = 1.0
 
     def __post_init__(self):
         object.__setattr__(self, "score", float(self.score))
+        object.__setattr__(self, "confidence", float(self.confidence))
 
 
 @dataclass(frozen=True)
@@ -55,14 +64,21 @@ class MatchList:
             the list aggregator selected by the schema; `""` if not set.
             Consumed by attribution/repair to pick the per-aggregator α
             schedule.
+        confidence: Aggregate stability score in `[0, 1]`. For
+            `kind="reorder"` lists, the mean per-pair confidence from the
+            Hungarian matching over matched children; for
+            `kind="fixed"`/`"prefix"`/`"combined"` lists, the mean of
+            child confidences. `1.0` when `compute_confidence=False`.
     """
 
     score: float
     children: list = field(default_factory=list)
     kind: str = ""
+    confidence: float = 1.0
 
     def __post_init__(self):
         object.__setattr__(self, "score", float(self.score))
+        object.__setattr__(self, "confidence", float(self.confidence))
 
 
 @dataclass(frozen=True)
@@ -77,13 +93,19 @@ class MatchDict:
         score: Aggregate similarity in `[0, 1]`.
         children: Mapping from a key-level `MatchItem` to the value-level
             match (`MatchItem`, `MatchList`, or `MatchDict`).
+        confidence: Aggregate stability score in `[0, 1]` blending the
+            key-pair Hungarian confidence and the value-subtree confidence
+            using the same `keyImportance` / `valueImportance` weights
+            used for `score`. `1.0` when `compute_confidence=False`.
     """
 
     score: float
     children: dict = field(default_factory=dict)
+    confidence: float = 1.0
 
     def __post_init__(self):
         object.__setattr__(self, "score", float(self.score))
+        object.__setattr__(self, "confidence", float(self.confidence))
 
 
 # Cross-module imports are placed here — *after* the MatchItem/MatchList/
@@ -137,6 +159,9 @@ class _AlignContext:
     mask_scope: Any = None
     mask_all_refs: bool = False
     skip_validation: bool = False
+    compute_confidence: bool = False
+    confidence_method: str = "margin"
+    confidence_temperature: float = 8.0
 
 
 def path2str(p):
@@ -210,6 +235,118 @@ BUILTIN_NUMBER_METRICS = {
 SUPPORTED_CUSTOM_METRIC_TYPES = frozenset({"string", "number", "integer"})
 
 
+def _with_confidence(match, confidence):
+    """Return a copy of ``match`` with its top-level ``confidence`` set.
+
+    Used at Hungarian sites to attach a per-pair confidence to an already
+    fully-built recursive match object without re-aligning. All three
+    Match dataclasses are frozen, so a plain field write is impossible;
+    we lean on ``dataclasses.replace`` which the frozen API officially
+    supports.
+    """
+    from dataclasses import replace
+    return replace(match, confidence=float(confidence))
+
+
+def _hungarian_confidence(
+    similarity_matrix,
+    row_ind,
+    col_ind,
+    n,
+    m,
+    *,
+    method="margin",
+    temperature=8.0,
+):
+    """Per-pair and node-level confidence from a Hungarian assignment.
+
+    Reads the similarity matrix that was passed to
+    :func:`scipy.optimize.linear_sum_assignment` and returns a stability
+    score in ``[0, 1]`` for each chosen pair plus an aggregate scalar.
+    Excess/missing pairs (one side is zero-padding, i.e. ``row >= n`` or
+    ``col >= m``) score ``1.0`` — there is no ambiguity, the item is
+    simply unmatched.
+
+    The ``"margin"`` method computes the symmetric clipped margin against
+    the row's and column's second-best entries; the ``"entropy"`` method
+    softmaxes each row over its first ``m`` columns and returns
+    ``1 - H / log m``.
+
+    Args:
+        similarity_matrix: ``(d, d)`` matrix used by the Hungarian site,
+            with ``d = max(n, m)``.
+        row_ind, col_ind: Output of ``linear_sum_assignment(-similarity_matrix)``.
+        n, m: Real (unpadded) gold and pred sizes.
+        method: ``"margin"`` or ``"entropy"``.
+        temperature: Softmax temperature ``β`` (entropy method only).
+
+    Returns:
+        A tuple ``(pair_confidences, node_confidence)`` where
+        ``pair_confidences`` is a 1-D ``np.ndarray`` of length
+        ``len(row_ind)`` aligned with ``zip(row_ind, col_ind)`` and
+        ``node_confidence`` is a Python ``float`` — the mean of the
+        confidences over genuinely matched pairs (both sides in range),
+        or ``1.0`` if no such pair exists.
+    """
+    k = len(row_ind)
+    pair_conf = np.ones(k, dtype=np.float64)
+    matched_confs = []
+    if method == "margin":
+        for idx in range(k):
+            ri = int(row_ind[idx])
+            ci = int(col_ind[idx])
+            if ri >= n or ci >= m:
+                continue
+            row = similarity_matrix[ri, :m]
+            col = similarity_matrix[:n, ci]
+            chosen = float(similarity_matrix[ri, ci])
+            if m > 1:
+                row_others = np.delete(row, ci)
+                m_row = chosen - float(np.max(row_others))
+            else:
+                m_row = chosen
+            if n > 1:
+                col_others = np.delete(col, ri)
+                m_col = chosen - float(np.max(col_others))
+            else:
+                m_col = chosen
+            c = 0.5 * (min(1.0, max(0.0, m_row)) + min(1.0, max(0.0, m_col)))
+            pair_conf[idx] = c
+            matched_confs.append(c)
+    elif method == "entropy":
+        beta = float(temperature)
+        log_m = np.log(m) if m > 1 else 1.0
+        for idx in range(k):
+            ri = int(row_ind[idx])
+            ci = int(col_ind[idx])
+            if ri >= n or ci >= m:
+                continue
+            if m == 1:
+                pair_conf[idx] = 1.0
+                matched_confs.append(1.0)
+                continue
+            row = similarity_matrix[ri, :m].astype(np.float64)
+            shifted = beta * (row - np.max(row))
+            exp_row = np.exp(shifted)
+            denom = float(np.sum(exp_row))
+            if denom <= 0.0:
+                pair_conf[idx] = 1.0
+                matched_confs.append(1.0)
+                continue
+            p = exp_row / denom
+            with np.errstate(divide="ignore", invalid="ignore"):
+                ent_terms = np.where(p > 0.0, -p * np.log(p), 0.0)
+            H = float(np.sum(ent_terms))
+            c = 1.0 - H / log_m
+            c = min(1.0, max(0.0, c))
+            pair_conf[idx] = c
+            matched_confs.append(c)
+    else:
+        raise ValueError(f"unknown confidence method: {method!r}")
+    node_conf = float(np.mean(matched_confs)) if matched_confs else 1.0
+    return pair_conf, node_conf
+
+
 def to_python_value(value):
     if isinstance(value, np.generic):
         return value.item()
@@ -252,6 +389,9 @@ class ObjectAligner:
         feedback_style="gepa",
         dominant_fraction_threshold=0.60,
         warn_on_ambiguous_mapping=False,
+        compute_confidence=False,
+        confidence_method="margin",
+        confidence_entropy_temperature=8.0,
     ):
         """Initialize an `ObjectAligner` for the given schema.
 
@@ -295,6 +435,22 @@ class ObjectAligner:
             warn_on_ambiguous_mapping: If `True`, emit a `UserWarning`
                 whenever the Hungarian-derived id mapping for an `idScope`
                 is non-unique because of tied costs. Off by default.
+            compute_confidence: If `True`, populate the `confidence` field
+                on `MatchItem` / `MatchList` / `MatchDict` from the
+                similarity matrix used at each Hungarian site
+                (`order: "align"` lists and dict-key matching). Default
+                `False` keeps `confidence == 1.0` everywhere, which
+                preserves byte-identical output for `feedback()` and
+                `describe()` under default flags. See
+                [`docs/confidence.md`](../confidence.md).
+            confidence_method: `"margin"` (default) or `"entropy"`. Selects
+                the per-pair confidence formula. Margin is a fast linear
+                pass over the similarity matrix; entropy softmaxes each
+                row and reports `1 - H / log m`.
+            confidence_entropy_temperature: Softmax temperature `β` used
+                only when `confidence_method="entropy"`. Defaults to `8.0`,
+                which puts a Jaro 0.95 vs 0.80 at roughly a 3:1
+                probability ratio on `[0, 1]`-bounded similarities.
 
         Raises:
             ValueError: If `custom_metrics` contains an unsupported schema
@@ -334,6 +490,23 @@ class ObjectAligner:
 
         self._primitive_metrics = self._build_primitive_metric_registry(custom_metrics)
         self._warn_on_ambiguous_mapping = bool(warn_on_ambiguous_mapping)
+
+        if confidence_method not in ("margin", "entropy"):
+            raise ValueError(
+                f"confidence_method must be 'margin' or 'entropy', got {confidence_method!r}"
+            )
+        try:
+            ct = float(confidence_entropy_temperature)
+        except (TypeError, ValueError) as e:
+            raise ValueError("confidence_entropy_temperature must be a real number") from e
+        if not (ct > 0.0) or not np.isfinite(ct):
+            raise ValueError(
+                f"confidence_entropy_temperature must be finite and > 0, got {confidence_entropy_temperature!r}"
+            )
+        self._compute_confidence = bool(compute_confidence)
+        self._confidence_method = confidence_method
+        self._confidence_temperature = ct
+
         self._validate_importance_sums(schema)
         self._validate_null_scores(schema)
         self._id_scopes, self._scope_order = self._collect_id_scopes(schema)
@@ -866,18 +1039,32 @@ class ObjectAligner:
 
         row_ind, col_ind = linear_sum_assignment(-similarity_matrix)
 
+        if ctx.compute_confidence:
+            pair_conf, node_conf = _hungarian_confidence(
+                similarity_matrix, row_ind, col_ind, n, m,
+                method=ctx.confidence_method,
+                temperature=ctx.confidence_temperature,
+            )
+        else:
+            pair_conf = None
+            node_conf = 1.0
+
         aligned_gold = []
         aligned_pred = []
         aligned_scores = []
         for i in range(len(row_ind)):
             ri, ci = row_ind[i], col_ind[i]
             similarity = similarity_matrix[ri][ci]
+            pc = float(pair_conf[i]) if pair_conf is not None else 1.0
             if ri < n and ci < m:
                 sg, sp, sscore = subs[ri][ci]
                 if sscore.score > 0.0:
                     aligned_gold.append(sg)
                     aligned_pred.append(sp)
-                    aligned_scores.append(sscore)
+                    if pair_conf is not None:
+                        aligned_scores.append(_with_confidence(sscore, pc))
+                    else:
+                        aligned_scores.append(sscore)
                 else:
                     if sp is not None:
                         aligned_gold.append(None)
@@ -902,7 +1089,7 @@ class ObjectAligner:
         else:
             score = float(np.sum([s.score for s in aligned_scores])) / D
         score = max(0.0, min(1.0, score))
-        return {"gold": aligned_gold, "pred": aligned_pred, "match": MatchList(score=score, children=aligned_scores, kind="reorder")}
+        return {"gold": aligned_gold, "pred": aligned_pred, "match": MatchList(score=score, children=aligned_scores, kind="reorder", confidence=node_conf)}
 
     def _align_lists_fixed(self, gold, pred, schema, ctx):
         n, m = len(gold), len(pred)
@@ -999,7 +1186,11 @@ class ObjectAligner:
         else:
             score = float(dp[n][m]) / D
         score = max(0.0, min(1.0, score))
-        return {"gold": aligned_gold, "pred": aligned_pred, "match": MatchList(score=score, children=aligned_scores, kind="fixed")}
+        if ctx.compute_confidence and aligned_scores:
+            node_conf = float(np.mean([float(s.confidence) for s in aligned_scores]))
+        else:
+            node_conf = 1.0
+        return {"gold": aligned_gold, "pred": aligned_pred, "match": MatchList(score=score, children=aligned_scores, kind="fixed", confidence=node_conf)}
 
     def _align_lists_prefix(self, gold, pred, schema, ctx):
         aligned_gold = []
@@ -1033,7 +1224,11 @@ class ObjectAligner:
         weights = weights / weights.sum()
         score = float(np.sum([e.score * w for e, w in zip(aligned_matches, weights)]))
         score = max(0.0, min(1.0, score))
-        return {"gold": aligned_gold, "pred": aligned_pred, "match": MatchList(score=score, children=aligned_matches, kind="prefix")}
+        if ctx.compute_confidence and aligned_matches:
+            node_conf = float(np.sum([float(e.confidence) * w for e, w in zip(aligned_matches, weights)]))
+        else:
+            node_conf = 1.0
+        return {"gold": aligned_gold, "pred": aligned_pred, "match": MatchList(score=score, children=aligned_matches, kind="prefix", confidence=node_conf)}
 
     def _align_lists(self, g, p, schema, ctx):
         if "prefixItems" not in schema and "items" not in schema:
@@ -1069,7 +1264,14 @@ class ObjectAligner:
         rscore = rets[1]["match"].score
         score = pi * pscore + ri * rscore
         children = rets[0]["match"].children + rets[1]["match"].children
-        return {"gold": gold, "pred": pred, "match": MatchList(score=score, children=children, kind="combined")}
+        if ctx.compute_confidence:
+            pconf = float(rets[0]["match"].confidence)
+            rconf = float(rets[1]["match"].confidence)
+            combined_conf = pi * pconf + ri * rconf
+            combined_conf = min(1.0, max(0.0, combined_conf))
+        else:
+            combined_conf = 1.0
+        return {"gold": gold, "pred": pred, "match": MatchList(score=score, children=children, kind="combined", confidence=combined_conf)}
 
     def _align_dicts(self, g, p, schema, ctx):
         match_key = schema.get("keyScore", "jaro")
@@ -1096,34 +1298,51 @@ class ObjectAligner:
                 similarity_matrix[i][j] = 0.0 if sc < key_threshold else sc
         row_ind, col_ind = linear_sum_assignment(-similarity_matrix)
 
+        if ctx.compute_confidence:
+            pair_conf, keys_node_conf = _hungarian_confidence(
+                similarity_matrix, row_ind, col_ind, n, m,
+                method=ctx.confidence_method,
+                temperature=ctx.confidence_temperature,
+            )
+        else:
+            pair_conf = None
+            keys_node_conf = 1.0
+
         aligned_gkeys = []
         aligned_pkeys = []
         aligned_key_scores = []
+        aligned_key_confs = []
         for i in range(len(row_ind)):
             ri, ci = row_ind[i], col_ind[i]
+            pc = float(pair_conf[i]) if pair_conf is not None else 1.0
             if ri < n and ci < m:
                 sg, sp, sim = gkeys[ri], pkeys[ci], similarity_matrix[ri][ci]
                 if sim > 0:
                     aligned_gkeys.append(sg)
                     aligned_pkeys.append(sp)
                     aligned_key_scores.append(sim)
+                    aligned_key_confs.append(pc)
                 else:
                     if sp is not None:
                         aligned_gkeys.append(None)
                         aligned_pkeys.append(sp)
                         aligned_key_scores.append(sim)
+                        aligned_key_confs.append(1.0)
                     if sg is not None:
                         aligned_gkeys.append(sg)
                         aligned_pkeys.append(None)
                         aligned_key_scores.append(sim)
+                        aligned_key_confs.append(1.0)
             elif ri < n:
                 aligned_gkeys.append(gkeys[ri])
                 aligned_pkeys.append(None)
                 aligned_key_scores.append(0.0)
+                aligned_key_confs.append(1.0)
             elif ci < m:
                 aligned_gkeys.append(None)
                 aligned_pkeys.append(pkeys[ci])
                 aligned_key_scores.append(0.0)
+                aligned_key_confs.append(1.0)
 
         keys_score = float(np.mean(aligned_key_scores))
 
@@ -1164,16 +1383,30 @@ class ObjectAligner:
         aligned_gold = {}
         aligned_pred = {}
         children = {}
-        for gk, pk, aligned_value, key_score in zip(aligned_gkeys, aligned_pkeys, aligned_values, aligned_key_scores):
+        for gk, pk, aligned_value, key_score, key_conf in zip(
+            aligned_gkeys, aligned_pkeys, aligned_values, aligned_key_scores, aligned_key_confs
+        ):
             if gk is not None:
                 aligned_gold[gk] = aligned_value["gold"]
             if pk is not None:
                 aligned_pred[pk] = aligned_value["pred"]
-            children[MatchItem(score=key_score, gold=gk, pred=pk)] = aligned_value["match"]
+            children[
+                MatchItem(score=key_score, gold=gk, pred=pk, confidence=key_conf)
+            ] = aligned_value["match"]
 
         score = float(key_importance * keys_score + value_importance * values_score) / (key_importance + value_importance)
         score = max(0.0, min(1.0, score))
-        return {"gold": aligned_gold, "pred": aligned_pred, "match": MatchDict(score=score, children=children)}
+
+        if ctx.compute_confidence:
+            child_confs = np.array([float(e["match"].confidence) for e in aligned_values], dtype=np.float64)
+            vw = np.array(value_weights, dtype=np.float64) if not isinstance(value_weights, np.ndarray) else value_weights
+            values_conf = float(np.sum(vw * child_confs)) if len(child_confs) else 1.0
+            dict_conf = (key_importance * keys_node_conf + value_importance * values_conf) / (key_importance + value_importance)
+            dict_conf = min(1.0, max(0.0, dict_conf))
+        else:
+            dict_conf = 1.0
+
+        return {"gold": aligned_gold, "pred": aligned_pred, "match": MatchDict(score=score, children=children, confidence=dict_conf)}
 
     def _align_booleans(self, g, p, schema):
         score = similarity_exact(g, p)
@@ -1259,17 +1492,22 @@ class ObjectAligner:
             }
             if aligned.kind:
                 out["marker"] = aligned.kind
+            if abs(float(aligned.confidence) - 1.0) > 1e-12:
+                out["confidence"] = float(aligned.confidence)
             return out
 
         if isinstance(aligned, MatchList):
-            return {
+            out = {
                 "kind": "list",
                 "score": float(aligned.score),
                 "children": [self._serialize_match_debug(child) for child in aligned.children],
             }
+            if abs(float(aligned.confidence) - 1.0) > 1e-12:
+                out["confidence"] = float(aligned.confidence)
+            return out
 
         if isinstance(aligned, MatchDict):
-            return {
+            out = {
                 "kind": "dict",
                 "score": float(aligned.score),
                 "children": [
@@ -1280,6 +1518,9 @@ class ObjectAligner:
                     for key, child in aligned.children.items()
                 ],
             }
+            if abs(float(aligned.confidence) - 1.0) > 1e-12:
+                out["confidence"] = float(aligned.confidence)
+            return out
 
         raise TypeError(f"Unknown match instance: {aligned!r}")
 
@@ -1322,7 +1563,12 @@ class ObjectAligner:
         if not skip_validation:
             self._validator.validate(g)
             self._validator.validate(p)
-        ctx = _AlignContext(skip_validation=bool(skip_validation))
+        ctx = _AlignContext(
+            skip_validation=bool(skip_validation),
+            compute_confidence=self._compute_confidence,
+            confidence_method=self._confidence_method,
+            confidence_temperature=self._confidence_temperature,
+        )
         if self._id_scopes:
             ctx.gold_ids = self._validate_referential(g)
             ctx.pred_ids = self._collect_pred_ids(p)
@@ -1419,6 +1665,9 @@ class ObjectAligner:
         granularity="leaf",
         min_contribution=0.0,
         skip_validation=False,
+        rank_by="score_delta",
+        include_pairing_ambiguous=False,
+        ambiguity_threshold=0.30,
     ):
         """Emit a ranked list of scored repair ops for `(gold, pred)`.
 
@@ -1434,9 +1683,20 @@ class ObjectAligner:
             min_contribution: Drop ops whose `score_delta` falls below this
                 threshold.
             skip_validation: If `True`, skip JSON Schema validation.
+            rank_by: Sort key for the returned ops. One of
+                `"score_delta"` (default — current behavior),
+                `"expected_gain"` (`score_delta × confidence`), or
+                `"confidence"`. See [`docs/confidence.md`](../confidence.md).
+            include_pairing_ambiguous: If `True`, append a
+                `pairing_ambiguous` diagnostic op for every Hungarian
+                container whose `confidence` falls below
+                `ambiguity_threshold`. Diagnostic only — not applied by
+                `RepairResult.apply_to`. Off by default.
+            ambiguity_threshold: Confidence threshold for the
+                `pairing_ambiguous` walker. Defaults to `0.30`.
 
         Returns:
-            `RepairResult` whose `ops` is ranked by `score_delta`. If
+            `RepairResult` whose `ops` is ranked by `rank_by`. If
             `pred` fails validation, returns an empty result with
             `score=0.0`.
 
@@ -1466,6 +1726,9 @@ class ObjectAligner:
             ctx.current_mappings,
             granularity=granularity,
             min_contribution=min_contribution,
+            rank_by=rank_by,
+            include_pairing_ambiguous=include_pairing_ambiguous,
+            ambiguity_threshold=ambiguity_threshold,
         )
 
     def repair_from_match(
@@ -1477,6 +1740,9 @@ class ObjectAligner:
         *,
         granularity="leaf",
         min_contribution=0.0,
+        rank_by="score_delta",
+        include_pairing_ambiguous=False,
+        ambiguity_threshold=0.30,
     ):
         """Generate repair ops from an already-computed match tree.
 
@@ -1493,6 +1759,9 @@ class ObjectAligner:
                 automatically).
             granularity: See `repair()`.
             min_contribution: See `repair()`.
+            rank_by: See `repair()`.
+            include_pairing_ambiguous: See `repair()`.
+            ambiguity_threshold: See `repair()`.
 
         Returns:
             `RepairResult` — same shape as `repair()`.
@@ -1505,6 +1774,9 @@ class ObjectAligner:
             mappings,
             granularity=granularity,
             min_contribution=min_contribution,
+            rank_by=rank_by,
+            include_pairing_ambiguous=include_pairing_ambiguous,
+            ambiguity_threshold=ambiguity_threshold,
         )
 
     def feedback(
@@ -1520,6 +1792,9 @@ class ObjectAligner:
         dominant_fraction_threshold=None,
         granularity="leaf",
         skip_validation=False,
+        rank_by="score_delta",
+        include_pairing_ambiguous=False,
+        ambiguity_threshold=0.30,
     ):
         """Render prompt-optimizer feedback for `(gold, pred)`.
 
@@ -1547,6 +1822,16 @@ class ObjectAligner:
                 instance default.
             granularity: See `attribute()` / `repair()`.
             skip_validation: If `True`, skip JSON Schema validation.
+            rank_by: `"score_delta"` (default), `"expected_gain"`, or
+                `"confidence"`. See [`docs/confidence.md`](../confidence.md).
+                Default preserves byte-identical output of earlier
+                releases.
+            include_pairing_ambiguous: If `True`, surface a "Diagnostic
+                notes" trailing section listing Hungarian containers
+                whose `confidence` fell below `ambiguity_threshold`.
+                Off by default.
+            ambiguity_threshold: Confidence threshold for the diagnostic
+                walker. Default `0.30`.
 
         Returns:
             `FeedbackResult` whose `text` is suitable for pasting into a
@@ -1581,6 +1866,9 @@ class ObjectAligner:
         repair_result = self.repair_from_match(
             match_tree, gold, pred, ctx.current_mappings,
             granularity=granularity,
+            rank_by=rank_by,
+            include_pairing_ambiguous=include_pairing_ambiguous,
+            ambiguity_threshold=ambiguity_threshold,
         )
         return render_feedback(
             repair_result,
@@ -1611,6 +1899,9 @@ class ObjectAligner:
         include_metadata=False,
         dominant_fraction_threshold=None,
         granularity="leaf",
+        rank_by="score_delta",
+        include_pairing_ambiguous=False,
+        ambiguity_threshold=0.30,
     ):
         """Render feedback from an already-computed match tree.
 
@@ -1627,6 +1918,9 @@ class ObjectAligner:
             include_metadata: See `feedback()`.
             dominant_fraction_threshold: See `feedback()`.
             granularity: See `feedback()`.
+            rank_by: See `feedback()`.
+            include_pairing_ambiguous: See `feedback()`.
+            ambiguity_threshold: See `feedback()`.
 
         Returns:
             `FeedbackResult` — same shape as `feedback()`.
@@ -1634,6 +1928,9 @@ class ObjectAligner:
         repair_result = self.repair_from_match(
             match_tree, gold, pred, mappings,
             granularity=granularity,
+            rank_by=rank_by,
+            include_pairing_ambiguous=include_pairing_ambiguous,
+            ambiguity_threshold=ambiguity_threshold,
         )
         return render_feedback(
             repair_result,
@@ -1657,6 +1954,9 @@ class ObjectAligner:
         *,
         style=None,
         skip_validation=False,
+        show_confidence=False,
+        include_ambiguous=False,
+        ambiguity_threshold=0.30,
     ):
         """Render a plain-English description of `(gold, pred)`.
 
@@ -1670,6 +1970,17 @@ class ObjectAligner:
             style: Override the constructor `description_style`. `None`
                 defers to the instance default.
             skip_validation: If `True`, skip JSON Schema validation.
+            show_confidence: If `True`, append a banded confidence
+                suffix to every per-node line whose `confidence` falls
+                below `0.70`. Requires the owning aligner to have been
+                constructed with `compute_confidence=True`. Default
+                preserves byte-identical output of earlier releases.
+                See [`docs/confidence.md`](../confidence.md).
+            include_ambiguous: If `True`, emit an extra entry above
+                every Hungarian-paired container whose `confidence`
+                falls below `ambiguity_threshold`. Off by default.
+            ambiguity_threshold: Confidence threshold for the
+                ambiguous-entry emission. Default `0.30`.
 
         Returns:
             `DescriptionResult` whose `text` is the rendered indented
@@ -1697,6 +2008,9 @@ class ObjectAligner:
             match_tree,
             style=style or self.description_style_default,
             templates=self.description_templates,
+            show_confidence=show_confidence,
+            include_ambiguous=include_ambiguous,
+            ambiguity_threshold=ambiguity_threshold,
         )
 
     def describe_from_match(
@@ -1704,12 +2018,18 @@ class ObjectAligner:
         match_tree,
         *,
         style=None,
+        show_confidence=False,
+        include_ambiguous=False,
+        ambiguity_threshold=0.30,
     ):
         """Render a description from an already-computed match tree.
 
         Args:
             match_tree: A match tree returned by `align()`.
             style: See `describe()`.
+            show_confidence: See `describe()`.
+            include_ambiguous: See `describe()`.
+            ambiguity_threshold: See `describe()`.
 
         Returns:
             `DescriptionResult` — same shape as `describe()`.
@@ -1718,6 +2038,9 @@ class ObjectAligner:
             match_tree,
             style=style or self.description_style_default,
             templates=self.description_templates,
+            show_confidence=show_confidence,
+            include_ambiguous=include_ambiguous,
+            ambiguity_threshold=ambiguity_threshold,
         )
 
     def metric(

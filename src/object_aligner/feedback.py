@@ -80,6 +80,17 @@ _OP_KIND_HUMAN = {
 DEFAULT_FEEDBACK_TEMPLATES = _load_packaged_template("feedback.toml")
 _COMPACT_OVERRIDES = _load_packaged_template("feedback.compact.toml")
 
+# Optional confidence placeholders. Available on every per-op template
+# key — user-supplied overrides may include them; the shipped defaults do
+# not so byte-identical output is preserved when compute_confidence=False.
+_CONFIDENCE_PLACEHOLDERS = frozenset({"confidence", "confidence_pct"})
+
+
+def _op_placeholders(*names) -> frozenset:
+    """Per-op placeholder set, with the optional confidence pair added."""
+    return frozenset(names) | _CONFIDENCE_PLACEHOLDERS
+
+
 # Placeholders allowed in each template key. Used by construction-time
 # validation to reject typos in user-supplied overrides. Keep in sync with
 # the rendering code below.
@@ -89,46 +100,51 @@ _FEEDBACK_PLACEHOLDERS = {
         "score", "score_pct", "deficit", "deficit_pct",
         "n_shown", "n_total",
     }),
-    "feedback.op.primitive_replace": frozenset({
+    "feedback.op.primitive_replace": _op_placeholders(
         "rank", "path", "gold", "pred", "score_delta", "score_delta_pct",
-    }),
-    "feedback.op.primitive_replace_reorder": frozenset({
+    ),
+    "feedback.op.primitive_replace_reorder": _op_placeholders(
         "rank", "list_path", "gold", "pred", "score_delta", "score_delta_pct",
-    }),
-    "feedback.op.key_add": frozenset({
+    ),
+    "feedback.op.key_add": _op_placeholders(
         "rank", "path", "key", "gold", "score_delta", "score_delta_pct",
-    }),
-    "feedback.op.key_remove": frozenset({
+    ),
+    "feedback.op.key_remove": _op_placeholders(
         "rank", "path", "key", "pred", "score_delta", "score_delta_pct",
-    }),
-    "feedback.op.key_rename_add": frozenset({
+    ),
+    "feedback.op.key_rename_add": _op_placeholders(
         "rank", "gold_path", "pred_path", "gold_key", "pred_key",
         "gold", "score_delta", "score_delta_pct",
-    }),
-    "feedback.op.key_rename_remove": frozenset({
+    ),
+    "feedback.op.key_rename_remove": _op_placeholders(
         "rank", "pred_path", "pred_key", "pred",
-    }),
-    "feedback.op.list_item_add": frozenset({
+    ),
+    "feedback.op.list_item_add": _op_placeholders(
         "rank", "path", "gold", "score_delta", "score_delta_pct",
-    }),
-    "feedback.op.list_item_remove": frozenset({
+    ),
+    "feedback.op.list_item_remove": _op_placeholders(
         "rank", "path", "pred", "score_delta", "score_delta_pct",
-    }),
-    "feedback.op.list_item_missing": frozenset({
+    ),
+    "feedback.op.list_item_missing": _op_placeholders(
         "rank", "list_path", "gold", "score_delta", "score_delta_pct",
-    }),
-    "feedback.op.list_item_excess": frozenset({
+    ),
+    "feedback.op.list_item_excess": _op_placeholders(
         "rank", "list_path", "pred", "score_delta", "score_delta_pct",
-    }),
-    "feedback.op.ref_fix": frozenset({
+    ),
+    "feedback.op.ref_fix": _op_placeholders(
         "rank", "path", "gold", "pred", "score_delta", "score_delta_pct",
-    }),
-    "feedback.op.subtree_replace": frozenset({
+    ),
+    "feedback.op.subtree_replace": _op_placeholders(
         "rank", "path", "score_delta", "score_delta_pct",
-    }),
-    "feedback.op.null_value_replace": frozenset({
+    ),
+    "feedback.op.null_value_replace": _op_placeholders(
         "rank", "path", "gold", "pred", "score_delta", "score_delta_pct",
+    ),
+    # Diagnostic-only — pairing_ambiguous has no score_delta and is not a fix.
+    "feedback.op.pairing_ambiguous": frozenset({
+        "rank", "path", "confidence", "confidence_pct",
     }),
+    "feedback.diagnostics.intro": frozenset(),
     "feedback.synthesis.single_dominant": frozenset({
         "dominant_kind", "dominant_kind_human",
         "dominant_fraction", "dominant_fraction_pct",
@@ -191,6 +207,7 @@ class FeedbackEntry:
     pred: Any
     text: str
     pair_id: str = ""
+    confidence: float = 1.0
 
 
 @dataclass(frozen=True)
@@ -258,6 +275,7 @@ class FeedbackResult:
                     "pred": e.pred,
                     "text": e.text,
                     "pair_id": e.pair_id,
+                    "confidence": e.confidence,
                 }
                 for e in self.entries
             ],
@@ -458,6 +476,8 @@ def _render_entry_text(
         "rank": rank,
         "score_delta": op.score_delta,
         "score_delta_pct": 100.0 * op.score_delta,
+        "confidence": float(op.confidence),
+        "confidence_pct": 100.0 * float(op.confidence),
     }
     gold_str = _format_value(op.gold, fmt)
     pred_str = _format_value(op.pred, fmt)
@@ -507,6 +527,8 @@ def _render_entry_text(
         kwargs.update(path=op.path)
     elif op.kind == "null_value_replace":
         kwargs.update(path=op.path, gold=gold_str, pred=pred_str)
+    elif op.kind == "pairing_ambiguous":
+        kwargs.update(path=op.path)
     else:
         raise ValueError(
             f"unknown RepairOp.kind {op.kind!r} — no feedback handler"
@@ -530,6 +552,7 @@ def render_feedback(
     templates: dict | None = None,
     value_formatter: Callable[[Any], str] | None = None,
     dominant_fraction_threshold: float = _DEFAULT_DOMINANT_FRACTION,
+    include_diagnostics: bool = True,
 ) -> FeedbackResult:
     """Render a `RepairResult` as a top-K ranked feedback string.
 
@@ -556,6 +579,12 @@ def render_feedback(
             to 80 chars.
         dominant_fraction_threshold: Threshold above which the
             single-dominant synthesis line fires. Default `0.60`.
+        include_diagnostics: If `True` (default) and the underlying
+            `RepairResult` contains `pairing_ambiguous` ops (only emitted
+            when `aligner.feedback(..., include_pairing_ambiguous=True)`
+            was used), render them as a trailing "Diagnostic notes"
+            section. Set to `False` to suppress the section even when
+            such ops are present.
 
     Returns:
         `FeedbackResult` whose `text` is the fully rendered top-K
@@ -569,7 +598,13 @@ def render_feedback(
     final_templates = _build_templates(style, templates)
 
     score = float(repair_result.score)
-    all_ops = list(repair_result.ops)
+    all_ops_in = list(repair_result.ops)
+
+    # Partition diagnostic-only ops out so they do not consume top-K slots,
+    # do not contribute to the synthesis line, and cannot be filtered by
+    # min_score_delta (their delta is 0 by design).
+    all_ops = [op for op in all_ops_in if op.kind != "pairing_ambiguous"]
+    diag_ops = [op for op in all_ops_in if op.kind == "pairing_ambiguous"]
     n_total_ops = len(all_ops)
 
     selected, truncated = _select_top_k(all_ops, top_k, min_score_delta)
@@ -639,7 +674,36 @@ def render_feedback(
             pred=op.pred,
             text=text,
             pair_id=op.pair_id,
+            confidence=float(op.confidence),
         ))
+
+    # Build diagnostic entries (pairing_ambiguous). These are NOT counted
+    # against top_k and NOT filtered by min_score_delta — they ride on the
+    # opt-in include_pairing_ambiguous flag in repair() and are surfaced
+    # in a dedicated section by the renderer.
+    diag_entries: list[FeedbackEntry] = []
+    if include_diagnostics:
+        for op in diag_ops:
+            if style == "json":
+                text = ""
+            else:
+                text = _render_entry_text(
+                    op, rank=0, templates=final_templates,
+                    fmt=fmt, pair_paths={},
+                )
+            diag_entries.append(FeedbackEntry(
+                rank=0,
+                op_kind=op.kind,
+                op=op.op,
+                path=op.path,
+                score_delta=float(op.score_delta),
+                score_delta_pct=100.0 * float(op.score_delta),
+                gold=op.gold,
+                pred=op.pred,
+                text=text,
+                pair_id=op.pair_id,
+                confidence=float(op.confidence),
+            ))
 
     # Build the final text string.
     if style == "json":
@@ -648,6 +712,7 @@ def render_feedback(
         full_text = _render_full_text(
             score=score,
             entries=entries,
+            diag_entries=diag_entries,
             n_total_ops=n_total_ops,
             templates=final_templates,
             include_synthesis_line=include_synthesis_line,
@@ -661,7 +726,7 @@ def render_feedback(
     return FeedbackResult(
         score=score,
         text=full_text,
-        entries=tuple(entries),
+        entries=tuple(list(entries) + diag_entries),
         style=style,
         truncated=truncated,
         n_total_ops=n_total_ops,
@@ -673,26 +738,35 @@ def _render_full_text(
     *,
     score: float,
     entries: list,
+    diag_entries: list,
     n_total_ops: int,
     templates: dict,
     include_synthesis_line: bool,
     dominant_fraction_threshold: float,
 ) -> str:
-    """Render intro + entry lines + optional synthesis line."""
+    """Render intro + entry lines + optional synthesis + diagnostics."""
     visible = [e for e in entries if e.text]
+    visible_diag = [e for e in diag_entries if e.text]
     n_shown = len(visible)
 
     if n_shown == 0:
-        # Either perfect match, or everything filtered/silenced.
+        # Either perfect match, or everything filtered/silenced. We still
+        # emit a diagnostics section if pairing_ambiguous ops fired —
+        # they carry real information even when no fixes are visible.
         if score >= 1.0:
-            return templates["feedback.intro.perfect"].format(
+            out = templates["feedback.intro.perfect"].format(
                 score=score,
                 score_pct=100.0 * score,
             )
-        return templates["feedback.empty"].format(
-            score=score,
-            score_pct=100.0 * score,
-        )
+        else:
+            out = templates["feedback.empty"].format(
+                score=score,
+                score_pct=100.0 * score,
+            )
+        if visible_diag:
+            out += templates["feedback.diagnostics.intro"]
+            out += "\n" + "\n".join(e.text for e in visible_diag)
+        return out
 
     deficit = 1.0 - score
     intro = templates["feedback.intro.imperfect"].format(
@@ -722,4 +796,7 @@ def _render_full_text(
             out += templates["feedback.synthesis.mixed"].format(
                 top_kinds=_compute_top_kinds(entries),
             )
+    if visible_diag:
+        out += templates["feedback.diagnostics.intro"]
+        out += "\n" + "\n".join(e.text for e in visible_diag)
     return out

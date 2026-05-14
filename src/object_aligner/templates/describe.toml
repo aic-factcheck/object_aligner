@@ -43,9 +43,20 @@
 "describe.list.excess"    = "{indent}The predicted list item \"{pred}\" is excessive, it was not in the gold.\n"
 "describe.list.missing"   = "{indent}The predicted output misses the \"{gold}\" list item from the gold.\n"
 
+# Placeholders: indent, confidence, confidence_pct, n_gold, n_pred
+# Opt-in diagnostic — emitted only when render_description(include_ambiguous=True)
+# and the list's confidence falls below ambiguity_threshold. Inserted before the
+# normal list walk; not a replacement.
+"describe.list.ambiguous" = "{indent}NOTE: alignment between {n_gold} gold and {n_pred} predicted list items was ambiguous (confidence {confidence_pct}).\n"
+
 # Placeholders: indent, score, score_pct
 "describe.dict.match"     = "{indent}The predicted dictionary perfectly matches the gold one:\n"
 "describe.dict.mismatch"  = "{indent}The predicted dictionary scores {score_pct}:\n"
+
+# Placeholders: indent, confidence, confidence_pct
+# Opt-in diagnostic — emitted only when render_description(include_ambiguous=True)
+# and the dict's confidence falls below ambiguity_threshold.
+"describe.dict.ambiguous" = "{indent}NOTE: dict key alignment was ambiguous (confidence {confidence_pct}).\n"
 
 # Placeholders: indent, gold, pred, score, score_pct
 "describe.dict.key.match"    = "{indent}KEY = The predicted key \"{pred}\" exactly matches the gold.\n"

@@ -33,10 +33,13 @@ from object_aligner.attribution import (
 from object_aligner.object_aligner import MatchDict, MatchItem, MatchList
 
 _VALID_GRANULARITIES = ("leaf", "subtree", "all")
+_VALID_RANK_BY = ("score_delta", "expected_gain", "confidence")
 
 _OP_ADD = "add"
 _OP_REMOVE = "remove"
 _OP_REPLACE = "replace"
+# Pseudo-RFC6902 op for diagnostic-only entries (e.g. pairing_ambiguous).
+_OP_DESCRIBE = "describe"
 
 
 @dataclass(frozen=True)
@@ -54,7 +57,8 @@ class RepairOp:
         score_delta: Positive — how much of the deficit `1 - S` applying
             this op would close (approximate, v1).
         kind: Finer discriminator (`primitive_replace`, `key_add`,
-            `list_item_missing`, `ref_fix`, `null_value_replace`, etc.).
+            `list_item_missing`, `ref_fix`, `null_value_replace`,
+            `pairing_ambiguous`, etc.).
         value: For `add` / `replace` ops, the value to write.
         gold: Gold value at the patch site (informational, useful for
             rendering feedback).
@@ -62,6 +66,11 @@ class RepairOp:
         pair_id: Non-empty for ops that must be applied atomically with
             another op (currently `key_rename_remove` + `key_rename_add`
             pairs).
+        confidence: Stability score in `[0, 1]` of the alignment that
+            produced this op, inherited from the originating match node.
+            `1.0` for ops not derived from a Hungarian pairing, and
+            `1.0` everywhere when `compute_confidence=False`. Used by
+            `rank_by="expected_gain"` / `"confidence"`.
     """
 
     op: str
@@ -72,6 +81,7 @@ class RepairOp:
     gold: Any = None
     pred: Any = None
     pair_id: str = ""
+    confidence: float = 1.0
 
 
 @dataclass(frozen=True)
@@ -140,6 +150,9 @@ def generate_repairs(
     *,
     granularity: str = "leaf",
     min_contribution: float = 0.0,
+    rank_by: str = "score_delta",
+    include_pairing_ambiguous: bool = False,
+    ambiguity_threshold: float = 0.30,
 ) -> RepairResult:
     """Generate a ranked list of scored repair ops for a match tree.
 
@@ -162,17 +175,35 @@ def generate_repairs(
         granularity: `"leaf"` (default), `"subtree"`, or `"all"`.
         min_contribution: Drop ops whose `score_delta` falls below this
             threshold. Atomic pairs are kept iff the carrying op passes.
+        rank_by: Sort key for the returned ops list. One of
+            `"score_delta"` (default, descending by raw deficit closed),
+            `"expected_gain"` (descending by `score_delta × confidence`),
+            or `"confidence"` (descending by stability of the originating
+            pairing). All three modes use the same deterministic
+            tiebreaker `(path, op, kind)`. Default preserves byte-for-
+            byte behavior of pre-confidence releases.
+        include_pairing_ambiguous: If `True`, walk the match tree for
+            Hungarian-paired containers whose `confidence` falls below
+            `ambiguity_threshold` and append a `pairing_ambiguous` op
+            (with `score_delta = 0`) at each such path. Diagnostic
+            only — `RepairResult.apply_to` ignores them. Off by default.
+        ambiguity_threshold: Confidence threshold for the
+            `pairing_ambiguous` walker. Default `0.30`.
 
     Returns:
-        `RepairResult` whose `ops` are ranked by `score_delta` descending.
+        `RepairResult` whose `ops` are ranked under `rank_by`.
 
     Raises:
-        ValueError: If `granularity` is not one of `"leaf"` / `"subtree"`
-            / `"all"`.
+        ValueError: If `granularity` or `rank_by` is not one of the
+            supported values.
     """
     if granularity not in _VALID_GRANULARITIES:
         raise ValueError(
             f"granularity must be one of {_VALID_GRANULARITIES!r}, got {granularity!r}"
+        )
+    if rank_by not in _VALID_RANK_BY:
+        raise ValueError(
+            f"rank_by must be one of {_VALID_RANK_BY!r}, got {rank_by!r}"
         )
 
     state = _WalkState(mappings=mappings or {}, granularity=granularity)
@@ -197,8 +228,40 @@ def generate_repairs(
     if min_contribution > 0.0:
         ops = _filter_paired_ops(ops, min_contribution)
 
-    # Sort: descending by score_delta, ties broken by (path, op, kind) lex.
-    ops.sort(key=lambda o: (-o.score_delta, o.path, o.op, o.kind))
+    # Opt-in diagnostic ops for low-confidence Hungarian containers. Emit
+    # AFTER the score-delta filter so they cannot be dropped by it (their
+    # score_delta is 0 by design). They are appended here rather than during
+    # the main walk so the ordering of fix ops stays stable when this flag
+    # toggles.
+    if include_pairing_ambiguous:
+        ops = list(ops) + list(
+            _emit_pairing_ambiguous(match_tree, ambiguity_threshold)
+        )
+
+    # Sort according to rank_by. Tiebreaker is the deterministic
+    # (path, op, kind) tuple in every mode so within-tie ordering is stable.
+    if rank_by == "score_delta":
+        ops.sort(key=lambda o: (-o.score_delta, o.path, o.op, o.kind))
+    elif rank_by == "expected_gain":
+        ops.sort(
+            key=lambda o: (
+                -o.score_delta * o.confidence,
+                -o.score_delta,
+                o.path,
+                o.op,
+                o.kind,
+            )
+        )
+    else:  # rank_by == "confidence"
+        ops.sort(
+            key=lambda o: (
+                -o.confidence,
+                -o.score_delta,
+                o.path,
+                o.op,
+                o.kind,
+            )
+        )
 
     total = float(sum(op.score_delta for op in ops))
     residual = total - deficit
@@ -294,6 +357,7 @@ def _walk_item(
                 kind="null_value_replace",
                 gold=node.gold,
                 pred=node.pred,
+                confidence=float(node.confidence),
             )
         )
         return
@@ -315,6 +379,7 @@ def _walk_item(
                 kind="ref_fix",
                 gold=node.gold,
                 pred=node.pred,
+                confidence=float(node.confidence),
             )
         )
         return
@@ -348,6 +413,7 @@ def _walk_item(
                 kind=op_kind,
                 gold=node.gold,
                 pred=node.pred,
+                confidence=float(node.confidence),
             )
         )
 
@@ -376,6 +442,7 @@ def _walk_list(
                 kind="subtree_replace",
                 gold=gold_subtree,
                 pred=pred_subtree,
+                confidence=float(node.confidence),
             )
         )
 
@@ -399,7 +466,7 @@ def _walk_list(
         # MatchItem children: handle directly so we can choose the right
         # path (list-level for reorder, child-level otherwise).
         if isinstance(child, MatchItem):
-            if _emit_list_unmatched_op(child, list_kind, path, child_path, c_child, state):
+            if _emit_list_unmatched_op(child, list_kind, path, child_path, c_child, node, state):
                 continue
             # Both sides present, imperfect score: emit primitive replace.
             if child.score < 1.0:
@@ -418,6 +485,7 @@ def _walk_list(
                         kind=op_kind,
                         gold=child.gold,
                         pred=child.pred,
+                        confidence=float(child.confidence),
                     )
                 )
             continue
@@ -444,12 +512,18 @@ def _emit_list_unmatched_op(
     list_path: str,
     child_path: str,
     c_child: float,
+    parent_list: MatchList,
     state: _WalkState,
 ) -> bool:
     """Emit add/remove for a list child where one side is None. Returns True if handled."""
     if child.gold is None and child.pred is None:
         # Dual-None prefix sentinel: nothing useful to emit.
         return True
+
+    # Unmatched list items are excess/missing, not paired — their stability
+    # is the parent list's container-level confidence (the Hungarian decided
+    # to leave this one without a partner).
+    parent_conf = float(parent_list.confidence)
 
     if child.pred is None and child.gold is not None:
         if list_kind == "reorder":
@@ -467,6 +541,7 @@ def _emit_list_unmatched_op(
                 kind=op_kind,
                 gold=child.gold,
                 pred=None,
+                confidence=parent_conf,
             )
         )
         return True
@@ -487,6 +562,7 @@ def _emit_list_unmatched_op(
                 kind=op_kind,
                 gold=None,
                 pred=child.pred,
+                confidence=parent_conf,
             )
         )
         return True
@@ -514,6 +590,7 @@ def _walk_dict(
                 kind="subtree_replace",
                 gold=gold_subtree,
                 pred=pred_subtree,
+                confidence=float(node.confidence),
             )
         )
 
@@ -536,7 +613,9 @@ def _walk_dict(
         # Case 1: excess pred key (gold key None).
         if gk is None and pk is not None:
             # The whole pred entry is excess; emit a single remove covering
-            # both key and value contributions.
+            # both key and value contributions. Excess/missing keys are
+            # unmatched pairs; their stability is the parent dict's
+            # container-level confidence.
             value_contribution = c_value * (1.0 - value_match.score) if isinstance(value_match, MatchItem) else 0.0
             state.ops.append(
                 RepairOp(
@@ -547,6 +626,7 @@ def _walk_dict(
                     kind="key_remove",
                     gold=None,
                     pred=pred_subtree.get(pk) if isinstance(pred_subtree, dict) else None,
+                    confidence=float(node.confidence),
                 )
             )
             continue
@@ -564,6 +644,7 @@ def _walk_dict(
                     kind="key_add",
                     gold=gold_value,
                     pred=None,
+                    confidence=float(node.confidence),
                 )
             )
             continue
@@ -620,6 +701,25 @@ def _walk_dict(
         value_gain = sum(op.score_delta for op in side_ops)
         key_gain = c_key * (1.0 - key_match.score)
 
+        # Gain-weighted blend of key-pair and value-subtree confidences.
+        # When total_gain is zero, both halves are perfect; rename_conf
+        # defaults to 1.0 (the rename has nothing to fix and is fully
+        # committed). See research/opus47_confidence_analysis.md §4.2.4.
+        total_gain = key_gain + value_gain
+        if total_gain > 0:
+            value_conf_avg = (
+                sum(op.score_delta * op.confidence for op in side_ops) / value_gain
+                if value_gain > 0
+                else 1.0
+            )
+            rename_conf = (
+                key_gain * float(key_match.confidence)
+                + value_gain * value_conf_avg
+            ) / total_gain
+            rename_conf = min(1.0, max(0.0, rename_conf))
+        else:
+            rename_conf = 1.0
+
         # Emit the remove (score_delta = 0; paired).
         state.ops.append(
             RepairOp(
@@ -631,6 +731,7 @@ def _walk_dict(
                 gold=None,
                 pred=pred_value,
                 pair_id=pair_id,
+                confidence=rename_conf,
             )
         )
         # Emit the add carrying the gold value (fixes both key and content).
@@ -644,12 +745,58 @@ def _walk_dict(
                 gold=gold_value,
                 pred=pred_value,
                 pair_id=pair_id,
+                confidence=rename_conf,
             )
         )
         # We intentionally do NOT re-emit side_ops: the add carries all the
         # content gain already, and any leaf-level fixes inside the renamed
         # value would target a path that doesn't yet exist (the key is being
         # added by this op). The user applies the rename atomically.
+
+
+# -----------------------------------------------------------------------------
+# Pairing-ambiguous diagnostic walker (opt-in via include_pairing_ambiguous)
+# -----------------------------------------------------------------------------
+
+def _emit_pairing_ambiguous(match_tree, threshold: float):
+    """Yield ``RepairOp(kind="pairing_ambiguous")`` for every Hungarian-paired
+    container in ``match_tree`` whose ``confidence`` falls below ``threshold``.
+
+    Hungarian-paired containers are ``MatchList(kind="reorder")`` and any
+    ``MatchDict``. Other ``MatchList`` aggregators (fixed / prefix /
+    combined) aggregate child confidences without introducing pairing
+    ambiguity at their own level, so they are skipped.
+    """
+    def walk(node, path: str):
+        if isinstance(node, MatchList):
+            if node.kind == "reorder" and float(node.confidence) < threshold:
+                yield RepairOp(
+                    op=_OP_DESCRIBE,
+                    path=path or "/",
+                    score_delta=0.0,
+                    kind="pairing_ambiguous",
+                    confidence=float(node.confidence),
+                )
+            for i, child in enumerate(node.children):
+                yield from walk(child, _join_path(path, i))
+            return
+        if isinstance(node, MatchDict):
+            if float(node.confidence) < threshold:
+                yield RepairOp(
+                    op=_OP_DESCRIBE,
+                    path=path or "/",
+                    score_delta=0.0,
+                    kind="pairing_ambiguous",
+                    confidence=float(node.confidence),
+                )
+            for key_match, value_match in node.children.items():
+                if key_match.gold is not None:
+                    yield from walk(value_match, _join_path(path, key_match.gold))
+            return
+        # MatchItem leaf: no container to be ambiguous about.
+        return
+
+    yield from walk(match_tree, "")
 
 
 # -----------------------------------------------------------------------------

@@ -47,4 +47,5 @@ nav:
   - Scored JSON-Patch Repair: repair.md
   - Prompt-Optimizer Feedback: feedback.md
   - Null Handling: null_handling.md
+  - Alignment Confidence: confidence.md
   - API Reference: api.md

@@ -56,28 +56,46 @@ _VALID_STYLES = ("default", "json")
 # API contract).
 DEFAULT_DESCRIPTION_TEMPLATES = _load_packaged_template("describe.toml")
 
+# Optional confidence placeholders. Available on every per-node template
+# key — user-supplied overrides may include them; the shipped defaults do
+# not so byte-identical output is preserved when `show_confidence=False`.
+_CONFIDENCE_PLACEHOLDERS = frozenset({"confidence", "confidence_pct", "confidence_suffix"})
+
+
+def _node_placeholders(*names) -> frozenset:
+    return frozenset(names) | _CONFIDENCE_PLACEHOLDERS
+
+
 # Placeholders allowed in each template key. Used by construction-time
 # validation to reject typos in user-supplied overrides. Keep in sync with
 # the rendering code below.
 _DESCRIPTION_PLACEHOLDERS = {
     "describe.intro.perfect": frozenset(),
     "describe.intro.imperfect": frozenset({"score", "score_pct"}),
-    "describe.item.match": frozenset({"indent", "gold", "pred", "score", "score_pct"}),
-    "describe.item.mismatch": frozenset({"indent", "gold", "pred", "score", "score_pct"}),
-    "describe.ref.match": frozenset({"indent", "gold", "pred", "score", "score_pct"}),
-    "describe.ref.mismatch": frozenset({"indent", "gold", "pred", "score", "score_pct"}),
-    "describe.id.match": frozenset({"indent", "gold", "pred", "score", "score_pct"}),
-    "describe.id.mismatch": frozenset({"indent", "gold", "pred", "score", "score_pct"}),
-    "describe.null.match": frozenset({"indent", "gold", "pred", "score", "score_pct"}),
-    "describe.null.mismatch": frozenset({"indent", "gold", "pred", "score", "score_pct"}),
-    "describe.list.match": frozenset({"indent", "score", "score_pct"}),
-    "describe.list.mismatch": frozenset({"indent", "score", "score_pct"}),
-    "describe.list.excess": frozenset({"indent", "gold", "pred", "score", "score_pct"}),
-    "describe.list.missing": frozenset({"indent", "gold", "pred", "score", "score_pct"}),
-    "describe.dict.match": frozenset({"indent", "score", "score_pct"}),
-    "describe.dict.mismatch": frozenset({"indent", "score", "score_pct"}),
-    "describe.dict.key.match": frozenset({"indent", "gold", "pred", "score", "score_pct"}),
-    "describe.dict.key.mismatch": frozenset({"indent", "gold", "pred", "score", "score_pct"}),
+    "describe.item.match": _node_placeholders("indent", "gold", "pred", "score", "score_pct"),
+    "describe.item.mismatch": _node_placeholders("indent", "gold", "pred", "score", "score_pct"),
+    "describe.ref.match": _node_placeholders("indent", "gold", "pred", "score", "score_pct"),
+    "describe.ref.mismatch": _node_placeholders("indent", "gold", "pred", "score", "score_pct"),
+    "describe.id.match": _node_placeholders("indent", "gold", "pred", "score", "score_pct"),
+    "describe.id.mismatch": _node_placeholders("indent", "gold", "pred", "score", "score_pct"),
+    "describe.null.match": _node_placeholders("indent", "gold", "pred", "score", "score_pct"),
+    "describe.null.mismatch": _node_placeholders("indent", "gold", "pred", "score", "score_pct"),
+    "describe.list.match": _node_placeholders("indent", "score", "score_pct"),
+    "describe.list.mismatch": _node_placeholders("indent", "score", "score_pct"),
+    "describe.list.excess": _node_placeholders("indent", "gold", "pred", "score", "score_pct"),
+    "describe.list.missing": _node_placeholders("indent", "gold", "pred", "score", "score_pct"),
+    # Opt-in: emitted only when render_description(include_ambiguous=True)
+    # and the node's confidence falls below the threshold.
+    "describe.list.ambiguous": frozenset({
+        "indent", "confidence", "confidence_pct", "n_gold", "n_pred",
+    }),
+    "describe.dict.match": _node_placeholders("indent", "score", "score_pct"),
+    "describe.dict.mismatch": _node_placeholders("indent", "score", "score_pct"),
+    "describe.dict.ambiguous": frozenset({
+        "indent", "confidence", "confidence_pct",
+    }),
+    "describe.dict.key.match": _node_placeholders("indent", "gold", "pred", "score", "score_pct"),
+    "describe.dict.key.mismatch": _node_placeholders("indent", "gold", "pred", "score", "score_pct"),
     "describe.dict.value.prefix": frozenset({"indent"}),
     "describe.validation_error": frozenset({"path", "message"}),
 }
@@ -111,13 +129,19 @@ class DescriptionEntry:
             for fixed/prefix lists the index is included.
         depth: 0-indexed nesting depth (matches the visual indent depth).
         match_kind: One of ``"item"``, ``"list"``, ``"dict"``, ``"key"``,
-            ``"ref"``, ``"id"``.
+            ``"ref"``, ``"id"``, or ``"ambiguous"`` (opt-in low-confidence
+            container marker emitted only when
+            ``include_ambiguous=True``).
         outcome: One of ``"match"``, ``"mismatch"``, ``"excess"``,
-            ``"missing"``.
+            ``"missing"``, ``"ambiguous"``.
         score: Similarity in ``[0, 1]`` at this node.
         text: Rendered template body for this node. May be ``""`` for
             silenced templates (default ``describe.id.match`` /
             ``describe.id.mismatch`` are empty).
+        confidence: Stability of the pairing that produced this node in
+            ``[0, 1]``. Inherited from the originating Match node and
+            always populated. ``1.0`` everywhere when
+            ``compute_confidence=False`` on the owning ``ObjectAligner``.
     """
 
     path: str
@@ -126,6 +150,7 @@ class DescriptionEntry:
     outcome: str
     score: float
     text: str
+    confidence: float = 1.0
 
 
 @dataclass(frozen=True)
@@ -181,6 +206,7 @@ class DescriptionResult:
                     "outcome": e.outcome,
                     "score": e.score,
                     "text": e.text,
+                    "confidence": e.confidence,
                 }
                 for e in self.entries
             ],
@@ -252,6 +278,37 @@ def _dict_child_path(parent_path: str, key: Any) -> str:
 # Walker
 # -----------------------------------------------------------------------------
 
+def _confidence_suffix(confidence: float, show: bool) -> str:
+    """Banded suffix string for the optional ``{confidence_suffix}`` placeholder.
+
+    Emits ``""`` when off (preserving byte-identical output) or when the
+    confidence is high (``>= 0.70``). Otherwise emits a parenthetical
+    tag that escalates phrasing as confidence drops.
+    """
+    if not show:
+        return ""
+    c = float(confidence)
+    if c >= 0.70:
+        return ""
+    if c >= 0.40:
+        return f" (confidence {c:.2f})"
+    return f" (low confidence {c:.2f})"
+
+
+def _apply_suffix(text: str, suffix: str) -> str:
+    """Inject ``suffix`` immediately before the trailing newline of ``text``.
+
+    Most describe templates end in ``\\n``. Inserting before the newline
+    keeps the prose flowing visually and matches what a hand-written
+    template-with-suffix would produce.
+    """
+    if not suffix:
+        return text
+    if text.endswith("\n"):
+        return text[:-1] + suffix + "\n"
+    return text + suffix
+
+
 def _walk(
     aligned,
     *,
@@ -259,6 +316,9 @@ def _walk(
     depth: int,
     templates: dict,
     entries: list,
+    show_confidence: bool = False,
+    include_ambiguous: bool = False,
+    ambiguity_threshold: float = 0.30,
 ) -> str:
     """Recursively render a match node, append entries, return prose."""
     # Late import to avoid a circular dependency: describe.py is imported by
@@ -278,7 +338,14 @@ def _walk(
             pred=aligned.pred,
             score=aligned.score,
             score_pct=_pct(aligned.score),
+            confidence=float(aligned.confidence),
+            confidence_pct=_pct(float(aligned.confidence)),
+            confidence_suffix=_confidence_suffix(aligned.confidence, show_confidence),
         )
+        # If the template did not consume {confidence_suffix}, inject the
+        # banded suffix here (preserves byte-identical output when off).
+        if "{confidence_suffix}" not in templates[template_key]:
+            text = _apply_suffix(text, _confidence_suffix(aligned.confidence, show_confidence))
         entries.append(DescriptionEntry(
             path=path,
             depth=depth,
@@ -286,6 +353,7 @@ def _walk(
             outcome=outcome,
             score=float(aligned.score),
             text=text,
+            confidence=float(aligned.confidence),
         ))
         return text
 
@@ -296,7 +364,12 @@ def _walk(
             indent=indent,
             score=aligned.score,
             score_pct=_pct(aligned.score),
+            confidence=float(aligned.confidence),
+            confidence_pct=_pct(float(aligned.confidence)),
+            confidence_suffix=_confidence_suffix(aligned.confidence, show_confidence),
         )
+        if "{confidence_suffix}" not in templates[template_key]:
+            header = _apply_suffix(header, _confidence_suffix(aligned.confidence, show_confidence))
         entries.append(DescriptionEntry(
             path=path,
             depth=depth,
@@ -304,9 +377,44 @@ def _walk(
             outcome=outcome,
             score=float(aligned.score),
             text=header,
+            confidence=float(aligned.confidence),
         ))
         fragments = [header]
         list_kind = getattr(aligned, "kind", "") or ""
+        # Opt-in low-confidence container note. Emitted at child_indent so
+        # it visually sits under the header. Only for Hungarian-paired
+        # list aggregators; fixed/prefix/combined are not flagged here
+        # because their confidence is just a child average.
+        if (
+            include_ambiguous
+            and list_kind == "reorder"
+            and float(aligned.confidence) < float(ambiguity_threshold)
+        ):
+            n_gold = sum(
+                1 for c in aligned.children
+                if not (isinstance(c, MatchItem) and c.gold is None)
+            )
+            n_pred = sum(
+                1 for c in aligned.children
+                if not (isinstance(c, MatchItem) and c.pred is None)
+            )
+            amb_text = templates["describe.list.ambiguous"].format(
+                indent=child_indent,
+                confidence=float(aligned.confidence),
+                confidence_pct=_pct(float(aligned.confidence)),
+                n_gold=n_gold,
+                n_pred=n_pred,
+            )
+            entries.append(DescriptionEntry(
+                path=path,
+                depth=depth + 1,
+                match_kind="ambiguous",
+                outcome="ambiguous",
+                score=float(aligned.score),
+                text=amb_text,
+                confidence=float(aligned.confidence),
+            ))
+            fragments.append(amb_text)
         for index, child in enumerate(aligned.children):
             child_path = _list_child_path(path, index, list_kind)
             if isinstance(child, MatchItem) and child.gold is None and child.pred is None:
@@ -320,7 +428,12 @@ def _walk(
                     gold=child.gold,
                     score=child.score,
                     score_pct=_pct(child.score),
+                    confidence=float(child.confidence),
+                    confidence_pct=_pct(float(child.confidence)),
+                    confidence_suffix=_confidence_suffix(child.confidence, show_confidence),
                 )
+                if "{confidence_suffix}" not in templates["describe.list.excess"]:
+                    text = _apply_suffix(text, _confidence_suffix(child.confidence, show_confidence))
                 entries.append(DescriptionEntry(
                     path=child_path,
                     depth=depth + 1,
@@ -328,6 +441,7 @@ def _walk(
                     outcome="excess",
                     score=float(child.score),
                     text=text,
+                    confidence=float(child.confidence),
                 ))
                 fragments.append(text)
                 continue
@@ -338,7 +452,12 @@ def _walk(
                     pred=child.pred,
                     score=child.score,
                     score_pct=_pct(child.score),
+                    confidence=float(child.confidence),
+                    confidence_pct=_pct(float(child.confidence)),
+                    confidence_suffix=_confidence_suffix(child.confidence, show_confidence),
                 )
+                if "{confidence_suffix}" not in templates["describe.list.missing"]:
+                    text = _apply_suffix(text, _confidence_suffix(child.confidence, show_confidence))
                 entries.append(DescriptionEntry(
                     path=child_path,
                     depth=depth + 1,
@@ -346,6 +465,7 @@ def _walk(
                     outcome="missing",
                     score=float(child.score),
                     text=text,
+                    confidence=float(child.confidence),
                 ))
                 fragments.append(text)
                 continue
@@ -355,6 +475,9 @@ def _walk(
                 depth=depth + 1,
                 templates=templates,
                 entries=entries,
+                show_confidence=show_confidence,
+                include_ambiguous=include_ambiguous,
+                ambiguity_threshold=ambiguity_threshold,
             ))
         return "".join(fragments)
 
@@ -365,7 +488,12 @@ def _walk(
             indent=indent,
             score=aligned.score,
             score_pct=_pct(aligned.score),
+            confidence=float(aligned.confidence),
+            confidence_pct=_pct(float(aligned.confidence)),
+            confidence_suffix=_confidence_suffix(aligned.confidence, show_confidence),
         )
+        if "{confidence_suffix}" not in templates[template_key]:
+            header = _apply_suffix(header, _confidence_suffix(aligned.confidence, show_confidence))
         entries.append(DescriptionEntry(
             path=path,
             depth=depth,
@@ -373,8 +501,28 @@ def _walk(
             outcome=outcome,
             score=float(aligned.score),
             text=header,
+            confidence=float(aligned.confidence),
         ))
         fragments = [header]
+        if (
+            include_ambiguous
+            and float(aligned.confidence) < float(ambiguity_threshold)
+        ):
+            amb_text = templates["describe.dict.ambiguous"].format(
+                indent=child_indent,
+                confidence=float(aligned.confidence),
+                confidence_pct=_pct(float(aligned.confidence)),
+            )
+            entries.append(DescriptionEntry(
+                path=path,
+                depth=depth + 1,
+                match_kind="ambiguous",
+                outcome="ambiguous",
+                score=float(aligned.score),
+                text=amb_text,
+                confidence=float(aligned.confidence),
+            ))
+            fragments.append(amb_text)
         for key, child in aligned.children.items():
             key_outcome = "match" if key.score == 1.0 else "mismatch"
             key_template_key = f"describe.dict.key.{key_outcome}"
@@ -385,7 +533,12 @@ def _walk(
                 pred=key.pred,
                 score=key.score,
                 score_pct=_pct(key.score),
+                confidence=float(key.confidence),
+                confidence_pct=_pct(float(key.confidence)),
+                confidence_suffix=_confidence_suffix(key.confidence, show_confidence),
             )
+            if "{confidence_suffix}" not in templates[key_template_key]:
+                key_text = _apply_suffix(key_text, _confidence_suffix(key.confidence, show_confidence))
             entries.append(DescriptionEntry(
                 path=child_path,
                 depth=depth + 1,
@@ -393,6 +546,7 @@ def _walk(
                 outcome=key_outcome,
                 score=float(key.score),
                 text=key_text,
+                confidence=float(key.confidence),
             ))
             fragments.append(key_text)
             value_prefix = templates["describe.dict.value.prefix"].format(
@@ -404,6 +558,9 @@ def _walk(
                 depth=depth + 1,
                 templates=templates,
                 entries=entries,
+                show_confidence=show_confidence,
+                include_ambiguous=include_ambiguous,
+                ambiguity_threshold=ambiguity_threshold,
             )
             fragments.append(value_prefix + child_prose.lstrip() + "\n")
         return "".join(fragments)
@@ -420,6 +577,9 @@ def render_description(
     *,
     style: str = "default",
     templates: dict | None = None,
+    show_confidence: bool = False,
+    include_ambiguous: bool = False,
+    ambiguity_threshold: float = 0.30,
 ) -> DescriptionResult:
     """Render a match tree as a deterministic English description.
 
@@ -433,6 +593,17 @@ def render_description(
             ``.entries`` only).
         templates: User template overrides (full dict, partial dict, or
             ``None`` for defaults).
+        show_confidence: If ``True``, append a banded confidence suffix
+            (e.g. ``" (low confidence 0.23)"``) to every per-node line
+            whose confidence falls below ``0.70``. Default ``False``
+            preserves byte-identical output of pre-confidence releases.
+        include_ambiguous: If ``True``, emit a dedicated
+            ``describe.list.ambiguous`` / ``describe.dict.ambiguous``
+            entry before walking any Hungarian-paired container whose
+            confidence falls below ``ambiguity_threshold``. Off by
+            default.
+        ambiguity_threshold: Confidence threshold for the ambiguous-entry
+            emission. Default ``0.30``.
 
     Returns:
         ``DescriptionResult`` whose ``text`` is the fully rendered
@@ -467,6 +638,9 @@ def render_description(
         depth=0,
         templates=templates,
         entries=entries,
+        show_confidence=show_confidence,
+        include_ambiguous=include_ambiguous,
+        ambiguity_threshold=ambiguity_threshold,
     )
 
     if style == "json":

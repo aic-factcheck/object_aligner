@@ -56,6 +56,17 @@
 # Placeholders: rank, path, gold, pred, score_delta, score_delta_pct
 "feedback.op.null_value_replace" = "{rank}. {path}: null/value mismatch (expected {gold}, got {pred}). Fixing this recovers +{score_delta:.3f}."
 
+# Placeholders: rank, path, confidence, confidence_pct
+# Diagnostic-only op kind, emitted when include_pairing_ambiguous=True.
+# It is *not* a fix — the value of this entry is in telling the optimizer
+# that the alignment itself was uncertain at this path, so chasing the
+# fixes underneath it may not improve the score.
+"feedback.op.pairing_ambiguous" = "~ {path}: pairing between gold and predicted items was ambiguous (confidence {confidence_pct:.0f}%). Make these items more distinctive before fixing deeper field-level errors."
+
+# (no placeholders) — diagnostics-section intro printed before any
+# pairing_ambiguous entries when at least one fires.
+"feedback.diagnostics.intro" = "\nDiagnostic notes (low-confidence pairings):"
+
 # Placeholders: dominant_kind, dominant_kind_human, dominant_fraction, dominant_fraction_pct
 "feedback.synthesis.single_dominant" = "\nFocus on {dominant_kind_human} errors — they account for {dominant_fraction_pct:.0f}% of the deficit shown."
 

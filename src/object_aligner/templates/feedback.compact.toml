@@ -33,3 +33,5 @@
 "feedback.op.subtree_replace" = "{rank}. {path}: replace subtree [+{score_delta:.3f}]"
 
 "feedback.op.null_value_replace" = "{rank}. {path}: null<->{gold} (got {pred}) [+{score_delta:.3f}]"
+
+"feedback.op.pairing_ambiguous" = "~ {path}: ambiguous pairing [c={confidence:.2f}]"
