@@ -54,7 +54,8 @@ The older `ObjectAligner("name", schema)` form and `get_name()` have been remove
 | 12 | [Prompt-Optimizer Feedback](feedback.md) | Top-K ranked prescriptive feedback strings for optimizer reflection slots |
 | 13 | [Null Handling](null_handling.md) | Per-field `nullScore` for asymmetric null/value mismatches |
 | 14 | [Alignment Confidence](confidence.md) | Per-pair stability scores from the Hungarian matrix, with opt-in feedback/describe integration |
-| 15 | [API Reference](api.md) | Generated reference of the public Python surface |
+| 15 | [Semantic Similarity](semantic.md) | Embedding-based string metrics with caching, batching, and OpenAI-compatible transport |
+| 16 | [API Reference](api.md) | Generated reference of the public Python surface |
 
 ## Installation
 

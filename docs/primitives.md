@@ -200,7 +200,7 @@ print(aligner.align("cat", "car"))
 print(aligner.align("cat", "dog"))
 ```
 
-This same mechanism can later be used for embedding-based or other semantic similarity functions.
+This same mechanism is what the embedding-backed semantic-similarity metric uses; see [Semantic Similarity](semantic.md) for the production-ready stack (OpenAI-compatible transport, in-memory and SQLite caches, pre-warming).
 
 ### Schema keywords
 

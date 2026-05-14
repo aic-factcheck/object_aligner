@@ -19,6 +19,16 @@ docs = [
     "mkdocs>=1.6",
     "mkdocs-material>=9.5,<9.7",
 ]
+# Semantic-similarity feature. The plain `semantic` extra is a no-op
+# today (mocks + SQLite cache need only stdlib + numpy, which is a
+# core dep already) but exists so future contributors can attach
+# optional deps (a tokenizer for BERTScore, sentence-transformers,
+# etc.) without breaking installs that pinned `[semantic]`.
+semantic = []
+# OpenAI-compatible HTTP transport used by `OpenAIEmbedder`. Required
+# to talk to cloud OpenAI, llama-cpp's `/v1/embeddings` endpoint, vllm,
+# and other servers implementing the same shape.
+semantic-openai = ["openai>=1.0"]
 
 [dependency-groups]
 dev = [

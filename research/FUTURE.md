@@ -63,3 +63,34 @@ previously appeared in more than one place collapse to a single entry.
   op-kind / match-type taxonomy grows; renames and removals are not
   permitted within a major version. See
   `research/opus47_promptopt_feedback.md` §7.5.
+
+---
+
+## Semantic similarity
+
+- **BERTScore (token-level metric).** The `Embedder` protocol already
+  allows 2-D `(n_tokens, dim)` arrays and the cache round-trips them.
+  Lands as a new `BertScoreMetric` module that does max-over-pairs +
+  P/R/F1 aggregation; no changes to transport or cache. See
+  `research/opus47_semantic_search.md` §9.1.
+- **Local Transformers embedder.** `LocalTransformersEmbedder` (or
+  `SentenceTransformersEmbedder`) using `transformers` or
+  `sentence-transformers`. Optional extra
+  `object-aligner[semantic-transformers]`. Device placement and batch
+  sizing are the implementation's responsibility — the protocol stays
+  the same. See `research/opus47_semantic_search.md` §12.3.
+- **`httpx`-based variant of `OpenAIEmbedder`.** Lighter alternative
+  to the official `openai` SDK for users who don't want the
+  pydantic / anyio transitive cost. Optional extra
+  `object-aligner[semantic-httpx]`.
+- **Pre-warm-on-call.** Today, `precompute(aligner, gold, pred)` is
+  manual. Add an opt-in flag on `ObjectAligner` (or on `metric()` /
+  `align()`) to auto-pre-warm before alignment runs.
+- **LRU eviction on `InMemoryEmbeddingCache`.** Bounded cache for
+  long-running processes; `OrderedDict`-based eviction with a
+  `maxsize` parameter.
+- **Float16 storage on `SQLiteEmbeddingCache`.** Memory optimisation
+  for caches with > 10⁵ entries.
+- **Cross-encoder rerankers.** Different protocol shape — single call
+  takes `(a, b)` and returns a score directly. Worth a separate
+  `Reranker` protocol if it becomes a priority.

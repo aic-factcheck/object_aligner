@@ -22,3 +22,6 @@ research/*
 
 # mkdocs build output
 site/
+
+# Local embedding cache produced by scripts/demo_semantic.py and friends
+.cache/

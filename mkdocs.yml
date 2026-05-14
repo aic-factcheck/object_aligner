@@ -48,4 +48,5 @@ nav:
   - Prompt-Optimizer Feedback: feedback.md
   - Null Handling: null_handling.md
   - Alignment Confidence: confidence.md
+  - Semantic Similarity: semantic.md
   - API Reference: api.md
