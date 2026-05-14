@@ -46,4 +46,5 @@ nav:
   - Per-Property Score Attribution: attribution.md
   - Scored JSON-Patch Repair: repair.md
   - Prompt-Optimizer Feedback: feedback.md
+  - Null Handling: null_handling.md
   - API Reference: api.md

@@ -23,7 +23,8 @@ class MatchItem:
         score: Similarity in `[0, 1]` between `gold` and `pred`.
         gold: The gold (reference) primitive value.
         pred: The predicted primitive value.
-        kind: `"id"` for `idScope` fields, `"ref"` for `ref` fields, and
+        kind: `"id"` for `idScope` fields, `"ref"` for `ref` fields,
+            `"null"` when one or both of `gold`/`pred` is `None`, and
             `""` otherwise. Surfaced as `"marker"` in the debug tree when
             non-empty.
     """
@@ -140,6 +141,18 @@ class _AlignContext:
 
 def path2str(p):
     return "/" + "/".join([str(d) for d in p])
+
+
+def _schema_allows_type(schema_type, name):
+    """Return True if ``schema_type`` (a JSON Schema ``type`` value, which
+    may be a string or a list of strings) permits ``name``. Used by the
+    alignment dispatcher to accept union types such as
+    ``type: ["string", "null"]`` alongside plain ``type: "string"``."""
+    if schema_type == name:
+        return True
+    if isinstance(schema_type, list) and name in schema_type:
+        return True
+    return False
 
 
 def similarity_exact(a, b):
@@ -322,6 +335,7 @@ class ObjectAligner:
         self._primitive_metrics = self._build_primitive_metric_registry(custom_metrics)
         self._warn_on_ambiguous_mapping = bool(warn_on_ambiguous_mapping)
         self._validate_importance_sums(schema)
+        self._validate_null_scores(schema)
         self._id_scopes, self._scope_order = self._collect_id_scopes(schema)
         self._validator = validator_for(schema)(schema)
 
@@ -443,6 +457,32 @@ class ObjectAligner:
                         raise ValueError(
                             f"prefixWeights must not sum to zero at {path2str([str(e) for e in schema_path])}"
                         )
+            for child, child_path in ObjectAligner._iter_schema_children(node, schema_path):
+                walk(child, child_path)
+
+        walk(schema, [])
+
+    @staticmethod
+    def _validate_null_scores(schema):
+        """Pre-walk the schema and raise ``ValueError`` if any ``nullScore``
+        is not a real number in ``[0, 1]``. Walks ``properties`` / ``items``
+        / ``prefixItems`` via `_iter_schema_children`."""
+
+        def walk(node, schema_path):
+            if not isinstance(node, dict):
+                return
+            if "nullScore" in node:
+                ns = node["nullScore"]
+                if isinstance(ns, bool) or not isinstance(ns, Real):
+                    raise ValueError(
+                        f"'nullScore' must be a real number, got {type(ns).__name__} "
+                        f"at {path2str([str(e) for e in schema_path])}"
+                    )
+                if not (0.0 <= float(ns) <= 1.0):
+                    raise ValueError(
+                        f"'nullScore' must be in [0, 1], got {ns} "
+                        f"at {path2str([str(e) for e in schema_path])}"
+                    )
             for child, child_path in ObjectAligner._iter_schema_children(node, schema_path):
                 walk(child, child_path)
 
@@ -795,7 +835,15 @@ class ObjectAligner:
         return D
 
     def _align_numbers(self, g, p, schema):
-        return self._align_primitive(g, p, schema, schema_type=schema["type"], default_score="invdiff")
+        # Resolve the primitive type when the schema declares a union
+        # (e.g. `type: ["integer", "null"]`): pick the numeric branch and
+        # ignore "null", which only governs the null-aware leaf above.
+        schema_type = schema.get("type")
+        if isinstance(schema_type, list):
+            primitive_type = "integer" if "integer" in schema_type else "number"
+        else:
+            primitive_type = schema_type
+        return self._align_primitive(g, p, schema, schema_type=primitive_type, default_score="invdiff")
 
     def _align_strings(self, g, p, schema):
         return self._align_primitive(g, p, schema, schema_type="string", default_score="jaro")
@@ -903,6 +951,11 @@ class ObjectAligner:
                 aligned_gold.append(sg)
                 aligned_pred.append(sp)
                 aligned_scores.append(sscore)
+                # A scored "match" cell always consumes one element from
+                # each side, even if either value is literally ``None``
+                # (a nullable item schema). Decrement both unconditionally.
+                i -= 1
+                j -= 1
             else:
                 if sp is not None:
                     aligned_gold.append(None)
@@ -912,11 +965,10 @@ class ObjectAligner:
                     aligned_gold.append(sg)
                     aligned_pred.append(None)
                     aligned_scores.append(MatchItem(0.0, gold=sg, pred=None))
-
-            if sg is not None:
-                i -= 1
-            if sp is not None:
-                j -= 1
+                if sg is not None:
+                    i -= 1
+                if sp is not None:
+                    j -= 1
 
         if i > 0:
             if j > 0:
@@ -1087,7 +1139,12 @@ class ObjectAligner:
                 value_weights.append(schema["properties"][gk].get("valueWeight", 1.0))
 
                 if type(ag) is not type(ap):
-                    if ctx.skip_validation:
+                    if ag is None or ap is None:
+                        # Null-aware: delegate to _align_helper, which routes
+                        # through `_align_null` and consults this property's
+                        # `nullScore` (default 0.0).
+                        aligned_value = self._align_helper(ag, ap, aux_schema, ctx)
+                    elif ctx.skip_validation:
                         # Soft-zero under skip_validation: caller opted into
                         # looser semantics, so type-mismatched values score 0
                         # rather than raising.
@@ -1122,6 +1179,16 @@ class ObjectAligner:
         score = similarity_exact(g, p)
         return {"gold": g, "pred": p, "match": MatchItem(score=score, gold=g, pred=p)}
 
+    def _align_null(self, g, p, schema):
+        # Both-None always scores 1.0; asymmetric uses the schema's
+        # `nullScore` (default 0.0). Range/type already validated at
+        # construction by `_validate_null_scores`.
+        if g is None and p is None:
+            score = 1.0
+        else:
+            score = float(schema.get("nullScore", 0.0)) if isinstance(schema, dict) else 0.0
+        return {"gold": g, "pred": p, "match": MatchItem(score=score, gold=g, pred=p, kind="null")}
+
     def _align_helper(self, g, p, schema, ctx):
         if isinstance(schema, dict):
             if schema.get("idScope") is not None:
@@ -1154,25 +1221,28 @@ class ObjectAligner:
                 else:
                     score = 0.0
                 return {"gold": g, "pred": p, "match": MatchItem(score=score, gold=g, pred=p, kind="ref")}
+        if g is None or p is None:
+            return self._align_null(g, p, schema)
+        schema_type = schema.get("type")
         if isinstance(g, bool):
-            if schema.get("type") != "boolean":
-                raise TypeError(f"schema declares type={schema.get('type')!r} but data is bool")
+            if not _schema_allows_type(schema_type, "boolean"):
+                raise TypeError(f"schema declares type={schema_type!r} but data is bool")
             aligned = self._align_booleans(g, p, schema)
         elif isinstance(g, (int, float)):
-            if schema.get("type") not in ("number", "integer"):
-                raise TypeError(f"schema declares type={schema.get('type')!r} but data is {type(g).__name__}")
+            if not (_schema_allows_type(schema_type, "number") or _schema_allows_type(schema_type, "integer")):
+                raise TypeError(f"schema declares type={schema_type!r} but data is {type(g).__name__}")
             aligned = self._align_numbers(g, p, schema)
         elif isinstance(g, str):
-            if schema.get("type") != "string":
-                raise TypeError(f"schema declares type={schema.get('type')!r} but data is str")
+            if not _schema_allows_type(schema_type, "string"):
+                raise TypeError(f"schema declares type={schema_type!r} but data is str")
             aligned = self._align_strings(g, p, schema)
         elif isinstance(g, list):
-            if schema.get("type") != "array":
-                raise TypeError(f"schema declares type={schema.get('type')!r} but data is list")
+            if not _schema_allows_type(schema_type, "array"):
+                raise TypeError(f"schema declares type={schema_type!r} but data is list")
             aligned = self._align_lists(g, p, schema, ctx)
         elif isinstance(g, dict):
-            if schema.get("type") != "object":
-                raise TypeError(f"schema declares type={schema.get('type')!r} but data is dict")
+            if not _schema_allows_type(schema_type, "object"):
+                raise TypeError(f"schema declares type={schema_type!r} but data is dict")
             aligned = self._align_dicts(g, p, schema, ctx)
         else:
             raise TypeError(f"unsupported data type: {type(g).__name__}")
@@ -1247,7 +1317,7 @@ class ObjectAligner:
         ``repair()`` uses this to access ``ctx.current_mappings`` for ``ref_fix``
         repair ops. The public ``align()`` discards the context.
         """
-        if type(g) is not type(p):
+        if type(g) is not type(p) and g is not None and p is not None:
             raise TypeError(f"gold and pred must be the same type, got {type(g).__name__} and {type(p).__name__}")
         if not skip_validation:
             self._validator.validate(g)

@@ -22,6 +22,8 @@ LEGACY_DESCRIBE = {
     "describe.ref.mismatch": '{indent}The predicted reference "{pred}" does not match the gold reference "{gold}" under the inferred id mapping (score={score_pct}).\n',
     "describe.id.match": "",
     "describe.id.mismatch": "",
+    "describe.null.match": "{indent}Both the predicted and gold values are null here.\n",
+    "describe.null.mismatch": '{indent}The predicted value "{pred}" does not match the gold "{gold}" (null/value mismatch, score={score_pct}).\n',
     "describe.list.match": "{indent}The predicted list perfectly matches the gold one:\n",
     "describe.list.mismatch": "{indent}The predicted list scores {score_pct}:\n",
     "describe.list.excess": '{indent}The predicted list item "{pred}" is excessive, it was not in the gold.\n',
@@ -76,6 +78,9 @@ LEGACY_FEEDBACK = {
     "feedback.op.subtree_replace":
         "{rank}. {path}: subtree differs. "
         "Replacing it recovers +{score_delta:.3f}.",
+    "feedback.op.null_value_replace":
+        "{rank}. {path}: null/value mismatch (expected {gold}, got {pred}). "
+        "Fixing this recovers +{score_delta:.3f}.",
     "feedback.synthesis.single_dominant":
         "\nFocus on {dominant_kind_human} errors — they account for "
         "{dominant_fraction_pct:.0f}% of the deficit shown.",
@@ -115,4 +120,6 @@ LEGACY_COMPACT = {
         "{rank}. {path}: ref {pred}->{gold} [+{score_delta:.3f}]",
     "feedback.op.subtree_replace":
         "{rank}. {path}: replace subtree [+{score_delta:.3f}]",
+    "feedback.op.null_value_replace":
+        "{rank}. {path}: null<->{gold} (got {pred}) [+{score_delta:.3f}]",
 }

@@ -329,7 +329,7 @@ Also produced for `idScope` and `ref` primitives.
 | `score` | `float` | *(required)* | Similarity in `[0, 1]` between `gold` and `pred`. |
 | `gold` | `Any` | *(required)* | The gold (reference) primitive value. |
 | `pred` | `Any` | *(required)* | The predicted primitive value. |
-| `kind` | `str` | '' | `"id"` for `idScope` fields, `"ref"` for `ref` fields, and `""` otherwise. Surfaced as `"marker"` in the debug tree when non-empty. |
+| `kind` | `str` | '' | `"id"` for `idScope` fields, `"ref"` for `ref` fields, `"null"` when one or both of `gold`/`pred` is `None`, and `""` otherwise. Surfaced as `"marker"` in the debug tree when non-empty. |
 
 ### `MatchList`
 <!-- anchor: matchlist -->
@@ -539,7 +539,7 @@ semantics. See [`docs/repair.md`](../repair.md) for the full
 | `op` | `str` | *(required)* | One of `"add"` / `"remove"` / `"replace"`. |
 | `path` | `str` | *(required)* | RFC 6901 JSON Pointer locating the patch site. |
 | `score_delta` | `float` | *(required)* | Positive — how much of the deficit `1 - S` applying this op would close (approximate, v1). |
-| `kind` | `str` | *(required)* | Finer discriminator (`primitive_replace`, `key_add`, `list_item_missing`, `ref_fix`, etc.). |
+| `kind` | `str` | *(required)* | Finer discriminator (`primitive_replace`, `key_add`, `list_item_missing`, `ref_fix`, `null_value_replace`, etc.). |
 | `value` | `Any` | None | For `add` / `replace` ops, the value to write. |
 | `gold` | `Any` | None | Gold value at the patch site (informational, useful for rendering feedback). |
 | `pred` | `Any` | None | Predicted value at the patch site (informational). |
@@ -644,7 +644,7 @@ result`` yields ``DescriptionEntry``s in match-tree traversal order.
 ### `DEFAULT_DESCRIPTION_TEMPLATES` (constant)
 <!-- anchor: default_description_templates-constant -->
 
-Type: `dict`. Dict with 18 keys.
+Type: `dict`. Dict with 20 keys.
 
 Default template strings live under `src/object_aligner/templates/`. Import this name and pass it (or an override dict) into `ObjectAligner(...)` to customize.
 
@@ -738,7 +738,7 @@ yields `FeedbackEntry`s in visible-rank order.
 ### `DEFAULT_FEEDBACK_TEMPLATES` (constant)
 <!-- anchor: default_feedback_templates-constant -->
 
-Type: `dict`. Dict with 18 keys.
+Type: `dict`. Dict with 19 keys.
 
 Default template strings live under `src/object_aligner/templates/`. Import this name and pass it (or an override dict) into `ObjectAligner(...)` to customize.
 

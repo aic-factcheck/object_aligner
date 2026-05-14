@@ -66,6 +66,7 @@ _OP_KIND_HUMAN = {
     "list_item_excess": "extraneous-list-item",
     "ref_fix": "reference",
     "subtree_replace": "subtree",
+    "null_value_replace": "null-value",
 }
 
 
@@ -124,6 +125,9 @@ _FEEDBACK_PLACEHOLDERS = {
     }),
     "feedback.op.subtree_replace": frozenset({
         "rank", "path", "score_delta", "score_delta_pct",
+    }),
+    "feedback.op.null_value_replace": frozenset({
+        "rank", "path", "gold", "pred", "score_delta", "score_delta_pct",
     }),
     "feedback.synthesis.single_dominant": frozenset({
         "dominant_kind", "dominant_kind_human",
@@ -501,6 +505,8 @@ def _render_entry_text(
         kwargs.update(path=op.path, gold=gold_str, pred=pred_str)
     elif op.kind == "subtree_replace":
         kwargs.update(path=op.path)
+    elif op.kind == "null_value_replace":
+        kwargs.update(path=op.path, gold=gold_str, pred=pred_str)
     else:
         raise ValueError(
             f"unknown RepairOp.kind {op.kind!r} — no feedback handler"

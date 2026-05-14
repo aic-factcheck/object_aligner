@@ -107,6 +107,29 @@ See [Referential alignment](referential.md) for worked examples.
 
 ---
 
+## Null-aware scoring (`nullScore`)
+
+LLM extractors regularly emit `null` for missing or unknown fields.
+The null-aware leaf fires when exactly one side is `None`; both-null
+always scores `1.0`; both-value runs the existing primitive comparator.
+
+| Keyword | Type | Default | Applies to | Description |
+|---------|------|---------|------------|-------------|
+| `nullScore` ⚡ | float in `[0, 1]` | `0.0` | any schema node (primitive, object, or array) | Score returned by the asymmetric case (`gold ≠ null` and `pred = null`, or vice versa). Symmetric — one number governs both directions. |
+
+To use `nullScore`, declare nullability in the schema's `type` (e.g.
+`type: ["string", "null"]`), otherwise standard JSON Schema validation
+rejects the null prediction before alignment runs. `nullScore` itself
+is validated at construction time: a non-real or out-of-range value
+raises `ValueError`.
+
+See [Null Handling](null_handling.md) for worked examples and the
+downstream surface (`MatchItem.kind == "null"`,
+`RepairOp.kind == "null_value_replace"`,
+`describe.null.match` / `describe.null.mismatch` templates).
+
+---
+
 ## Array type (`"type": "array"`)
 
 | Keyword | Type | Default | Description |

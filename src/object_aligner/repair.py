@@ -54,7 +54,7 @@ class RepairOp:
         score_delta: Positive — how much of the deficit `1 - S` applying
             this op would close (approximate, v1).
         kind: Finer discriminator (`primitive_replace`, `key_add`,
-            `list_item_missing`, `ref_fix`, etc.).
+            `list_item_missing`, `ref_fix`, `null_value_replace`, etc.).
         value: For `add` / `replace` ops, the value to write.
         gold: Gold value at the patch site (informational, useful for
             rendering feedback).
@@ -276,6 +276,26 @@ def _walk_item(
 
     # id leaves are always perfect — no op.
     if kind == "id":
+        return
+
+    # null-aware leaves: emitted by `_align_null` when one or both sides are
+    # None. Both-None is a perfect match (score 1.0) and produces no op;
+    # asymmetric emits a `null_value_replace` carrying `gold` as the target
+    # value (which may itself be None).
+    if kind == "null":
+        if node.score >= 1.0:
+            return
+        state.ops.append(
+            RepairOp(
+                op=_OP_REPLACE,
+                path=path,
+                value=node.gold,
+                score_delta=c_parent * (1.0 - node.score),
+                kind="null_value_replace",
+                gold=node.gold,
+                pred=node.pred,
+            )
+        )
         return
 
     # ref leaves: wrong → ref_fix; right → no op.

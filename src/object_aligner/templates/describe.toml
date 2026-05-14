@@ -28,6 +28,13 @@
 "describe.id.match"       = ""
 "describe.id.mismatch"    = ""
 
+# Placeholders: indent, gold, pred, score, score_pct
+# Emitted when one or both of gold/pred is null. The "match" row covers the
+# both-null case (score 1.0); "mismatch" covers asymmetric null/value cases
+# whose score is the schema's `nullScore`.
+"describe.null.match"     = "{indent}Both the predicted and gold values are null here.\n"
+"describe.null.mismatch"  = "{indent}The predicted value \"{pred}\" does not match the gold \"{gold}\" (null/value mismatch, score={score_pct}).\n"
+
 # Placeholders: indent, score, score_pct
 "describe.list.match"     = "{indent}The predicted list perfectly matches the gold one:\n"
 "describe.list.mismatch"  = "{indent}The predicted list scores {score_pct}:\n"

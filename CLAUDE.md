@@ -166,6 +166,7 @@ or in chapter files under `docs/` — link to `research/FUTURE.md` instead.
 | `valueWeight` | object property | float | `1.0` |
 | `idScope` | string/integer/number primitive (inside an array) | scope name (string) | — |
 | `ref` | string/integer/number primitive | scope name (string) | — |
+| `nullScore` | any schema node (primitive, object, or array) | float in `[0, 1]` | `0.0` |
 
 ## Referential Alignment
 
@@ -206,7 +207,7 @@ uv run pytest
 - Booleans must be checked before numbers in the dispatcher because `isinstance(True, int)` is `True` in Python
 - Unsupported primitive metric names should raise clear `ValueError`s rather than relying on `assert`
 - Custom metric registry validation happens at construction time
-- `MatchItem.kind` is `"id"` for `idScope` fields, `"ref"` for `ref` fields, and `""` (default) otherwise; the debug tree surfaces this as a `"marker"` field when non-empty.
+- `MatchItem.kind` is `"id"` for `idScope` fields, `"ref"` for `ref` fields, `"null"` when one or both of gold/pred is `None`, and `""` (default) otherwise; the debug tree surfaces this as a `"marker"` field when non-empty. The null-aware leaf is produced by `_align_null`, called from `_align_helper` after the `idScope`/`ref` short-circuits but before the type dispatch. `nullScore` (default `0.0`) is consulted only for the asymmetric case; both-`None` always scores `1.0`. The construction-time `_validate_null_scores` walker rejects out-of-range or non-real values via `_iter_schema_children`. Repair emits a corresponding `RepairOp(kind="null_value_replace")`; the dedicated feedback template key is `feedback.op.null_value_replace`; describe emits `describe.null.match` / `describe.null.mismatch`.
 - `_align_helper` short-circuits on `idScope` (always scores 1.0) and `ref` (scores via the bijection) **before** the type dispatch, so the order in that method matters — see the comment at the top of the method.
 - Per-call referential state (`current_mappings`, `pred_ids`, `gold_ids`, `pred_excess_ids`, `mask_scope`, `mask_all_refs`, `skip_validation`) lives in an `_AlignContext` dataclass that `align()` creates per call and threads through `_align_helper` and the recursive `_align_*` methods; concurrent `align()` / `metric()` calls on the same instance are safe.
 - The JSON Schema validator is built once at construction (`self._validator = validator_for(schema)(schema)`) and reused across `align()` / `metric()` calls.

@@ -229,3 +229,22 @@ def test_type_mismatch_softens_to_zero_under_skip_validation(gold, pred):
     from jsonschema import ValidationError
     with pytest.raises((ValidationError, TypeError)):
         aligner.align(gold, pred)
+
+
+def test_dict_property_one_sided_none_used_to_raise_typeerror():
+    """Regression: under the original code, a dict property whose gold and
+    pred values had different Python types (one being ``None``) raised
+    ``TypeError`` in ``_align_dicts``. With Cluster 6's null-aware dispatch
+    that same case now routes through ``_align_null`` and scores via the
+    property's ``nullScore`` (default 0.0)."""
+    schema = {
+        "type": "object",
+        "properties": {
+            "x": {"type": ["string", "null"], "nullScore": 0.6},
+        },
+    }
+    aligner = ObjectAligner(schema)
+    match = aligner.align({"x": "hi"}, {"x": None})
+    leaf = list(match.children.values())[0]
+    assert leaf.score == 0.6
+    assert leaf.kind == "null"

@@ -68,6 +68,8 @@ _DESCRIPTION_PLACEHOLDERS = {
     "describe.ref.mismatch": frozenset({"indent", "gold", "pred", "score", "score_pct"}),
     "describe.id.match": frozenset({"indent", "gold", "pred", "score", "score_pct"}),
     "describe.id.mismatch": frozenset({"indent", "gold", "pred", "score", "score_pct"}),
+    "describe.null.match": frozenset({"indent", "gold", "pred", "score", "score_pct"}),
+    "describe.null.mismatch": frozenset({"indent", "gold", "pred", "score", "score_pct"}),
     "describe.list.match": frozenset({"indent", "score", "score_pct"}),
     "describe.list.mismatch": frozenset({"indent", "score", "score_pct"}),
     "describe.list.excess": frozenset({"indent", "gold", "pred", "score", "score_pct"}),

@@ -36,7 +36,7 @@ def test_description_defaults_have_expected_keys():
 
 def test_feedback_defaults_have_expected_keys():
     assert set(DEFAULT_FEEDBACK_TEMPLATES) == set(_FEEDBACK_PLACEHOLDERS)
-    assert len(DEFAULT_FEEDBACK_TEMPLATES) == 18
+    assert len(DEFAULT_FEEDBACK_TEMPLATES) == 19
 
 
 def test_compact_overlay_only_overrides_known_keys():

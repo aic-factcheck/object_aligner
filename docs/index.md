@@ -52,7 +52,8 @@ The older `ObjectAligner("name", schema)` form and `get_name()` have been remove
 | 10 | [Per-Property Score Attribution](attribution.md) | Decompose the deficit into ranked per-path contributions |
 | 11 | [Scored JSON-Patch Repair](repair.md) | Ranked structured repair operations with estimated score deltas |
 | 12 | [Prompt-Optimizer Feedback](feedback.md) | Top-K ranked prescriptive feedback strings for optimizer reflection slots |
-| 13 | [API Reference](api.md) | Generated reference of the public Python surface |
+| 13 | [Null Handling](null_handling.md) | Per-field `nullScore` for asymmetric null/value mismatches |
+| 14 | [API Reference](api.md) | Generated reference of the public Python surface |
 
 ## Installation
 

@@ -866,8 +866,8 @@ def test_to_dict_round_trips_basic_types():
     assert d["text"] == fb.text
 
 
-def test_default_feedback_templates_has_18_keys():
-    assert len(DEFAULT_FEEDBACK_TEMPLATES) == 18
+def test_default_feedback_templates_has_19_keys():
+    assert len(DEFAULT_FEEDBACK_TEMPLATES) == 19
 
 
 def test_feedback_invalid_pred_renders_validation_error_text():
