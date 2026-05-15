@@ -523,6 +523,10 @@ def test_ref_fix_uses_pred_side_mapped_id():
                 "type": "array", "order": "align",
                 "items": {
                     "type": "object", "keyScore": "exact",
+                    # keyImportance > 0 keeps the relation dict score above 0
+                    # when both refs are wrong, so list-reorder pairs them
+                    # instead of splitting into missing+excess.
+                    "keyImportance": 1,
                     "properties": {
                         "source": {"type": "integer", "ref": "person"},
                         "target": {"type": "integer", "ref": "person"},

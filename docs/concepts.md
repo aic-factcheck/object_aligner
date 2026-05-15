@@ -25,9 +25,7 @@ schema = {
         "name": {"type": "string", "score": "jaro"},
         "age":  {"type": "integer", "score": "invdiff"}
     },
-    "keyScore": "exact",
-    "keyImportance": 1.0,
-    "valueImportance": 1.0
+    "keyScore": "exact"
 }
 ```
 

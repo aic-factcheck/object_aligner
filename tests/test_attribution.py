@@ -575,6 +575,10 @@ def test_ref_swapped_pair_contributes_full_weight():
                 "items": {
                     "type": "object",
                     "keyScore": "exact",
+                    # keyImportance > 0 keeps the relation dict score above 0
+                    # when both refs are wrong, so list-reorder pairs them
+                    # instead of splitting into missing+excess.
+                    "keyImportance": 1,
                     "properties": {
                         "source": {"type": "integer", "ref": "person"},
                         "target": {"type": "integer", "ref": "person"},

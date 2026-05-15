@@ -64,6 +64,12 @@ from object_aligner import ObjectAligner
 
 schema = {
     "type": "object",
+    # Open-vocabulary keys: the model also chooses the field names,
+    # so key-pairing confidence has to feed into the dict confidence.
+    # Without this override the default keyImportance=0 would zero
+    # out the key contribution and the blend would collapse to the
+    # value-subtree confidence alone.
+    "keyImportance": 1,
     "properties": {
         "name":  {"type": "string"},
         "age":   {"type": "integer"},
@@ -192,7 +198,9 @@ for key, value in match.children.items():
 Three observations.
 
 - The dict-level `confidence = 0.612` is the blended (key, value) score
-  with the schema's default `keyImportance = valueImportance = 1.0`.
+  with the shared-setup schema's `keyImportance = valueImportance = 1`.
+  (`keyImportance` defaults to `0`; the shared setup pins it to `1`
+  because this chapter studies the key-pairing case.)
 - `age ⇄ years` has `key_conf = 0.0`. That's the symmetric-margin
   formula at work: at least one of the row/column second-bests was at
   least as good as the chosen entry, so the clip sends the margin to

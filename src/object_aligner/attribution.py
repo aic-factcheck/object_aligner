@@ -541,7 +541,7 @@ def _list_alphas_combined(children, schema) -> list[float]:
 def _dict_alphas(node: MatchDict, schema):
     """Return (key_alphas, value_alphas), one entry per child pair."""
     n_pairs = len(node.children)
-    kappa = float(schema.get("keyImportance", 1.0))
+    kappa = float(schema.get("keyImportance", 0.0))
     nu = float(schema.get("valueImportance", 1.0))
     total_imp = kappa + nu
     kappa_bar = kappa / total_imp

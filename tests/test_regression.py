@@ -45,7 +45,9 @@ def test_dicts_documented_examples():
         },
     )
 
-    assert exact.metric({"name": "Alice", "age": 30}, {"name": "Alicia", "age": 29})["score"] == pytest.approx(0.8305555555555556)
+    # Default keyImportance=0 (exact schema): score is the mean of value pairs.
+    assert exact.metric({"name": "Alice", "age": 30}, {"name": "Alicia", "age": 29})["score"] == pytest.approx(0.6611111111111112)
+    # fuzzy schema pins keyImportance=1 explicitly.
     assert fuzzy.metric({"weight": 90, "name": "John", "age": 24}, {"name": "Johny", "ages": 23, "title": "Mr."})["score"] == pytest.approx(0.41874999999999996)
 
 

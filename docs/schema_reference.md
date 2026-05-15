@@ -173,7 +173,7 @@ Uses the Hungarian algorithm (via `scipy.optimize.linear_sum_assignment`):
 | `properties` ⚡ | object | *(required)* | Mapping from key name → property schema. Each property schema defines the type and scoring for that key's value. |
 | `keyScore` ⚡ | string | `"jaro"` | Key comparison function: `"jaro"` or `"exact"` |
 | `keyThreshold` ⚡ | float | `0.0` | Minimum key similarity to form a pairing; pairs below this are treated as unaligned |
-| `keyImportance` ⚡ | float | `1.0` | Weight of key score in the final dict score |
+| `keyImportance` ⚡ | float | `0.0` | Weight of key score in the final dict score. Default `0.0` means keys are *scaffolding*, not data — set to `1` (or higher) when the model also chooses the keys (open-vocabulary extraction, map-as-data dicts). See [`dicts.md`](dicts.md#key-importance) for guidance. |
 | `valueImportance` ⚡ | float | `1.0` | Weight of value score in the final dict score |
 
 ---

@@ -598,7 +598,7 @@ class ObjectAligner:
                 return
             t = node.get("type")
             if t == "object":
-                ki = node.get("keyImportance", 1.0)
+                ki = node.get("keyImportance", 0.0)
                 vi = node.get("valueImportance", 1.0)
                 if ki + vi == 0:
                     raise ValueError(
@@ -1280,7 +1280,7 @@ class ObjectAligner:
         key_threshold = schema.get("keyThreshold", 0.0)
         scoref = similarity_exact if match_key == "exact" else similarity_string_jaro
 
-        key_importance = schema.get("keyImportance", 1.0)
+        key_importance = schema.get("keyImportance", 0.0)
         value_importance = schema.get("valueImportance", 1.0)
 
         gkeys = list(g.keys())

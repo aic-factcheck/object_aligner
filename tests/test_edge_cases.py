@@ -37,7 +37,8 @@ def test_empty_unicode_and_emoji_strings():
     assert exact.metric("", "")["score"] == 1.0
     assert jaro.metric("", "abc")["score"] == 0.0
     assert emoji.metric({"name": "🔥"}, {"name": "🔥"})["score"] == 1.0
-    assert emoji.metric({"name": "🔥"}, {"name": "❄️"})["score"] == 0.5
+    # Default keyImportance=0: score reflects only the (mismatched) value.
+    assert emoji.metric({"name": "🔥"}, {"name": "❄️"})["score"] == 0.0
 
 
 def test_float_precision_mixed_number_types_and_integer_validation():

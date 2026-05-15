@@ -80,25 +80,24 @@ def dict_schema():
 def test_dict_property_per_field_null_score(dict_schema):
     aligner = ObjectAligner(dict_schema)
     # diagnosis is null-on-pred → 0.0, middle_name is null-on-both → 1.0.
-    # Both keys match perfectly (score 1.0 each). Default keyImportance ==
-    # valueImportance == 1.0, so the dict score is the average of keys and
-    # values blocks: keys=1.0, values=mean(0.0, 1.0)=0.5 → 0.75.
+    # Default keyImportance=0 → dict score is the mean of value pairs only:
+    # values=mean(0.0, 1.0)=0.5.
     r = aligner.metric(
         {"diagnosis": "flu", "middle_name": None},
         {"diagnosis": None,  "middle_name": None},
     )
-    assert r["score"] == pytest.approx(0.75)
+    assert r["score"] == pytest.approx(0.5)
 
 
 def test_dict_property_mixed_value_to_null(dict_schema):
     aligner = ObjectAligner(dict_schema)
     # Only middle_name asymmetric → nullScore=0.8 on one value, 1.0 on the
-    # other. values=mean(1.0, 0.8)=0.9, keys=1.0, total=0.95.
+    # other. values=mean(1.0, 0.8)=0.9 (default keyImportance=0).
     r = aligner.metric(
         {"diagnosis": "flu", "middle_name": "Q"},
         {"diagnosis": "flu", "middle_name": None},
     )
-    assert r["score"] == pytest.approx(0.95)
+    assert r["score"] == pytest.approx(0.9)
 
 
 def test_dict_pre_null_change_used_to_raise_typeerror(dict_schema):
@@ -110,8 +109,8 @@ def test_dict_pre_null_change_used_to_raise_typeerror(dict_schema):
         {"diagnosis": "x",  "middle_name": "Q"},
     )
     # diagnosis: nullScore=0.0; middle_name: both Q → 1.0.
-    # values=mean(0.0, 1.0)=0.5, keys=1.0, total=0.75.
-    assert r["score"] == pytest.approx(0.75)
+    # values=mean(0.0, 1.0)=0.5 (default keyImportance=0).
+    assert r["score"] == pytest.approx(0.5)
 
 
 # -----------------------------------------------------------------------------
@@ -131,9 +130,9 @@ def test_nullable_object_value():
     }
     aligner = ObjectAligner(schema)
     # gold has the object, pred has null → asymmetric, nullScore=0.5.
-    # keys=1.0, values=0.5, total=0.75.
+    # Default keyImportance=0 → total=0.5 (value only).
     r = aligner.metric({"addr": {"city": "Prague"}}, {"addr": None})
-    assert r["score"] == pytest.approx(0.75)
+    assert r["score"] == pytest.approx(0.5)
 
 
 def test_nullable_array_value():
@@ -149,8 +148,8 @@ def test_nullable_array_value():
     }
     aligner = ObjectAligner(schema)
     r = aligner.metric({"tags": ["a", "b"]}, {"tags": None})
-    # keys=1.0, values=0.3, total=0.65.
-    assert r["score"] == pytest.approx(0.65)
+    # Default keyImportance=0 → total=0.3 (value only, via nullScore).
+    assert r["score"] == pytest.approx(0.3)
 
 
 # -----------------------------------------------------------------------------

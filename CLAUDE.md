@@ -161,7 +161,7 @@ or in chapter files under `docs/` — link to `research/FUTURE.md` instead.
 | `restImportance` | array | float | — |
 | `keyScore` | object | `"jaro"`, `"exact"` | `"jaro"` |
 | `keyThreshold` | object | float | `0.0` |
-| `keyImportance` | object | float | `1.0` |
+| `keyImportance` | object | float | `0.0` |
 | `valueImportance` | object | float | `1.0` |
 | `valueWeight` | object property | float | `1.0` |
 | `idScope` | string/integer/number primitive (inside an array) | scope name (string) | — |

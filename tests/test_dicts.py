@@ -16,7 +16,8 @@ def test_exact_key_matching_basic_cases():
     )
 
     assert aligner.align({"a": 1, "b": 2}, {"a": 1, "b": 2}).score == 1.0
-    assert aligner.align({"a": 1, "b": 2}, {"a": 1, "b": 99}).score == pytest.approx(0.75)
+    # Default keyImportance=0: score is the mean of value-pairs only.
+    assert aligner.align({"a": 1, "b": 2}, {"a": 1, "b": 99}).score == pytest.approx(0.5)
     assert aligner.align({"a": 1}, {"a": 1, "b": 2}, skip_validation=True).score == pytest.approx(0.5)
     assert aligner.align({"a": 1, "b": 2}, {"b": 2, "a": 1}).score == 1.0
 

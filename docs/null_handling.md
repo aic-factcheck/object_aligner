@@ -79,14 +79,14 @@ gold = {"diagnosis": "flu", "middle_name": None}
 pred = {"diagnosis": None,  "middle_name": None}
 
 aligner.metric(gold, pred)
-# {'score': 0.75}
+# {'score': 0.5}
 ```
 
-The score breaks down cleanly: keys block scores `1.0` (both keys
-match exactly); the values block averages `0.0` (diagnosis: asymmetric
-null with `nullScore=0.0`) and `1.0` (middle_name: both null), giving
-`0.5`. Default `keyImportance` and `valueImportance` are both `1.0`,
-so the dict score is `(1.0 + 0.5) / 2 = 0.75`.
+The score breaks down cleanly: the values block averages `0.0`
+(diagnosis: asymmetric null with `nullScore=0.0`) and `1.0`
+(middle_name: both null), giving `0.5`. With the default
+`keyImportance = 0` the keys block does not contribute, so the dict
+score is `0.5`.
 
 ---
 
@@ -134,7 +134,7 @@ aligner.metric(
     {"address": {"city": "Prague", "zip": "11000"}},
     {"address": None},
 )
-# {'score': 0.75}   (keys=1.0, values=0.5, mean=0.75)
+# {'score': 0.5}   (value scored 0.5 via nullScore; default keyImportance=0 → keys do not contribute)
 ```
 
 The dispatcher fires the null branch **before** descending into the
@@ -184,8 +184,8 @@ aligner = ObjectAligner(schema, generate_feedback=True)
 r = aligner.metric({"diagnosis": "flu"}, {"diagnosis": None})
 
 print(r["feedback"])
-# The prediction scored 0.75 (deficit 0.25). Top 1 of 1 fix locations:
-# 1. /diagnosis: null/value mismatch (expected 'flu', got None). Fixing this recovers +0.250.
+# The prediction scored 0.00 (deficit 1.00). Top 1 of 1 fix locations:
+# 1. /diagnosis: null/value mismatch (expected 'flu', got None). Fixing this recovers +1.000.
 # Focus on null-value errors — they account for 100% of the deficit shown.
 ```
 

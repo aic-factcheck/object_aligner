@@ -51,6 +51,7 @@ FLAT_DICT_SCHEMA = {
 FUZZY_KEY_SCHEMA = {
     "type": "object",
     "keyScore": "jaro",
+    "keyImportance": 1,
     "properties": {
         "phoneNumber": {"type": "string", "score": "exact"},
     },

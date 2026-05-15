@@ -103,9 +103,7 @@ schema = {
         "name": {"type": "string",  "score": "jaro",  "valueWeight": 1.0},
         "city": {"type": "string",  "score": "jaro",  "valueWeight": 1.0}
     },
-    "keyScore": "exact",
-    "keyImportance": 1.0,
-    "valueImportance": 1.0
+    "keyScore": "exact"
 }
 ```
 
@@ -113,51 +111,72 @@ With this schema, a mismatch on `"id"` hurts the score three times as much as a 
 
 ---
 
-## Importance balancing: key vs. value
+## Key importance
 
 The final dictionary score combines the key score and the value score:
 
-```
-dictScore = (keyImportance * keysScore + valueImportance * valuesScore) / (keyImportance + valueImportance)
-```
+$$
+\text{dictScore} = \frac{w_k \cdot \text{keysScore} + w_v \cdot \text{valuesScore}}{w_k + w_v}
+$$
+
+where $w_k$ is `keyImportance` and $w_v$ is `valueImportance`.
+
+**Default: `keyImportance=0`, `valueImportance=1`.** Most evaluation
+pipelines today have a *fixed schema* — the model fills slots in a
+JSON shape the user already chose. In that setting the keys are
+*scaffolding*, not data: a free `keysScore = 1.0` term would just pad
+the average and compress the dynamic range that should distinguish
+good from bad predictions. Set `keyImportance = 0` (the default) to
+score only values.
+
+Override the default to `keyImportance ≥ 1` when **the model chose the
+keys**:
+
+* **Open-vocabulary extraction** — OCR forms, schema discovery, free-form
+  key-value attribute extraction. The choice between `"first_name"` /
+  `"firstName"` / `"name"` is part of correctness.
+* **Dicts used as maps, not records** — `Map<string, V>` rather than
+  `Record<known-fields, V>`. Glossaries `{"term": "definition"}`, entity
+  tables keyed by entity name, tag-to-confidence, label-to-count,
+  feature-flag-to-config. Key-match precision/recall is half the signal.
+* **Polymorphic / discriminated-union objects** — when the *presence* of
+  a key carries type information.
+* **Meta-evaluation** — aligning two schemas or configs, where the keys
+  *are* the data being compared.
 
 | Setting | Effect |
 |---------|--------|
-| `keyImportance=0, valueImportance=1` | Only care about values; ignore key quality |
-| `keyImportance=1, valueImportance=0` | Only care about key matching; ignore values |
-| `keyImportance=1, valueImportance=1` (default) | Equal weight to both |
+| `keyImportance=0, valueImportance=1` (default) | Score only values — fixed-schema evaluation |
+| `keyImportance=1, valueImportance=1` | Equal weight on keys and values — open-vocabulary extraction |
+| `keyImportance=1, valueImportance=0` | Score only key matching; ignore values |
 
-### Example: Only caring about values
+### Example: open-vocabulary key matching
 
-When keys are well-structured and you just want to evaluate whether the values are correct:
+When the model also chooses the keys (e.g. OCR'd form fields), set
+`keyImportance` so that picking the wrong key is penalised:
 
 ```python
-gold = {"a": [1, 2], "b": [3, 4]}
-pred = {"a": [1, 2], "b": [3, 5]}
+gold = {"first_name": "Alice", "age": 30}
+pred = {"firstname": "Alice", "ages": 30}   # both keys slightly off
 
 schema = {
     "type": "object",
     "properties": {
-        "a": {"type": "array", "items": {"type": "integer"}, "valueWeight": 1.0},
-        "b": {"type": "array", "items": {"type": "integer"}, "valueWeight": 1.0}
+        "first_name": {"type": "string"},
+        "age":        {"type": "integer", "score": "invdiff"}
     },
-    "keyScore": "exact",
-    "keyImportance": 0.0,     # ignore key quality
-    "valueImportance": 1.0    # only care about values
+    "keyScore": "jaro",
+    "keyImportance": 1.0,
+    "valueImportance": 1.0
 }
-aligner = ObjectAligner(schema, generate_description=True)
-result = aligner.metric(gold, pred)
-print(result["description"])
+aligner = ObjectAligner(schema)
+print(aligner.metric(gold, pred)["score"])
 ```
 
-Output:
-```
-The predicted output scores overall 88%...
-  KEY = The predicted key "b" exactly matches the gold.
-  VALUE = The predicted list scores 75%:
-    The predicted value "3" exactly matches the gold.
-    The predicted value "5" does not match the gold "4" (score=50%).
-```
+Here the dict score blends key-jaro similarities (`first_name`↔`firstname`,
+`age`↔`ages`) with the perfect value matches. With the default
+`keyImportance = 0` the same comparison would score $1.0$ — the model
+got the *values* right and the keys are treated as scaffolding.
 
 ---
 
@@ -200,7 +219,7 @@ These contribute negatively to both the key score and the value score.
 | `properties` | object | *(required)* | Per-key schemas (JSON Schema style) |
 | `keyScore` | string | `"jaro"` | `"jaro"` or `"exact"` — how to compare keys |
 | `keyThreshold` | float | `0.0` | Minimum key similarity to form a pairing |
-| `keyImportance` | float | `1.0` | Weight of key score in the final dict score |
+| `keyImportance` | float | `0.0` | Weight of key score in the final dict score. Override to `≥ 1` when the model chooses the keys (see [Key importance](#key-importance)). |
 | `valueImportance` | float | `1.0` | Weight of value score in the final dict score |
 | *(in properties)* `valueWeight` | float | `1.0` | Relative weight of this property's value |
 

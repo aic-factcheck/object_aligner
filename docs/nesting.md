@@ -273,7 +273,7 @@ Design highlights:
 
 1. **Start from the top** and work inward. Define the outermost type first, then add `properties` or `items`.
 
-2. **Use `keyImportance: 0`** when you care about values but not key matching quality (common when using `"keyScore": "exact"`).
+2. **`keyImportance` defaults to `0`** — the dict score is the mean of value pairs only. Override to `≥ 1` when the model also chooses the keys (open-vocabulary extraction, map-as-data dicts); see [`dicts.md`](dicts.md#key-importance).
 
 3. **Use `order: "align"`** for any collection where position is not meaningful.
 

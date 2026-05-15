@@ -336,6 +336,7 @@ def test_pairing_ambiguous_off_by_default():
 def test_pairing_ambiguous_emitted_with_strict_threshold():
     schema = {
         "type": "object",
+        "keyImportance": 1,
         "properties": {
             "name": {"type": "string"},
             "age": {"type": "integer"},
@@ -359,6 +360,7 @@ def test_pairing_ambiguous_emitted_with_strict_threshold():
 def test_pairing_ambiguous_in_feedback_text_under_diagnostics():
     schema = {
         "type": "object",
+        "keyImportance": 1,
         "properties": {
             "name": {"type": "string"},
             "age": {"type": "integer"},
@@ -418,6 +420,7 @@ def test_describe_show_confidence_emits_banded_suffix():
 def test_describe_include_ambiguous_emits_note():
     schema = {
         "type": "object",
+        "keyImportance": 1,
         "properties": {
             "name": {"type": "string"},
             "age": {"type": "integer"},
@@ -482,6 +485,7 @@ def test_match_dict_confidence_default_is_one():
 def test_debug_tree_emits_confidence_only_when_non_unit():
     schema = {
         "type": "object",
+        "keyImportance": 1,
         "properties": {
             "name": {"type": "string"},
             "age": {"type": "integer"},
@@ -513,6 +517,7 @@ def test_debug_tree_skips_confidence_for_unit_subtree():
 def test_repair_op_carries_confidence_from_match_node():
     schema = {
         "type": "object",
+        "keyImportance": 1,
         "properties": {
             "name": {"type": "string"},
             "age": {"type": "integer"},
