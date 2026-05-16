@@ -28,7 +28,9 @@
 
 "feedback.op.list_item_excess" = "{rank}. {list_path}: remove item {pred} [+{score_delta:.3f}]"
 
-"feedback.op.ref_fix" = "{rank}. {path}: ref {pred}->{gold} [+{score_delta:.3f}]"
+"feedback.op.ref_fix" = "{rank}. {path}: ref {pred}->{value} [+{score_delta:.3f}]"
+
+"feedback.op.ref_fix_no_target" = "{rank}. {path}: ref {pred} unresolved [+{score_delta:.3f}]"
 
 "feedback.op.subtree_replace" = "{rank}. {path}: replace subtree [+{score_delta:.3f}]"
 

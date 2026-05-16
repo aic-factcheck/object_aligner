@@ -74,8 +74,9 @@ _DESCRIPTION_PLACEHOLDERS = {
     "describe.intro.imperfect": frozenset({"score", "score_pct"}),
     "describe.item.match": _node_placeholders("indent", "gold", "pred", "score", "score_pct"),
     "describe.item.mismatch": _node_placeholders("indent", "gold", "pred", "score", "score_pct"),
-    "describe.ref.match": _node_placeholders("indent", "gold", "pred", "score", "score_pct"),
-    "describe.ref.mismatch": _node_placeholders("indent", "gold", "pred", "score", "score_pct"),
+    "describe.ref.match": _node_placeholders("indent", "pred", "score", "score_pct"),
+    "describe.ref.mismatch": _node_placeholders("indent", "pred", "value", "score", "score_pct"),
+    "describe.ref.no_target": _node_placeholders("indent", "pred", "score", "score_pct"),
     "describe.id.match": _node_placeholders("indent", "gold", "pred", "score", "score_pct"),
     "describe.id.mismatch": _node_placeholders("indent", "gold", "pred", "score", "score_pct"),
     "describe.null.match": _node_placeholders("indent", "gold", "pred", "score", "score_pct"),
@@ -133,7 +134,9 @@ class DescriptionEntry:
             container marker emitted only when
             ``include_ambiguous=True``).
         outcome: One of ``"match"``, ``"mismatch"``, ``"excess"``,
-            ``"missing"``, ``"ambiguous"``.
+            ``"missing"``, ``"ambiguous"``, ``"no_target"`` (the last is
+            ref-only — emitted when the gold referent has no counterpart
+            in the prediction under the derived bijection).
         score: Similarity in ``[0, 1]`` at this node.
         text: Rendered template body for this node. May be ``""`` for
             silenced templates (default ``describe.id.match`` /
@@ -330,12 +333,29 @@ def _walk(
 
     if isinstance(aligned, MatchItem):
         match_kind = getattr(aligned, "kind", "") or "item"
-        outcome = "match" if aligned.score == 1.0 else "mismatch"
+        if aligned.score == 1.0:
+            outcome = "match"
+        elif match_kind == "ref" and (
+            aligned.aux is None
+            or aligned.aux.get("mapped_pred") is None
+        ):
+            # The gold referent has no counterpart in the prediction under
+            # the derived bijection. Route to the dedicated template so the
+            # user-facing text does not surface a gold-space id.
+            outcome = "no_target"
+        else:
+            outcome = "mismatch"
         template_key = f"describe.{match_kind}.{outcome}"
+        mapped_pred = (
+            aligned.aux.get("mapped_pred")
+            if (match_kind == "ref" and aligned.aux is not None)
+            else None
+        )
         text = templates[template_key].format(
             indent=indent,
             gold=aligned.gold,
             pred=aligned.pred,
+            value=mapped_pred,
             score=aligned.score,
             score_pct=_pct(aligned.score),
             confidence=float(aligned.confidence),

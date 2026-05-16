@@ -334,7 +334,7 @@ Render feedback from an already-computed match tree.
 <!-- anchor: matchitem -->
 
 ```python
-MatchItem(score: float, gold: Any, pred: Any, kind: str = '', confidence: float = 1.0) -> None
+MatchItem(score: float, gold: Any, pred: Any, kind: str = '', confidence: float = 1.0, aux: collections.abc.Mapping[str, typing.Any] | None = None) -> None
 ```
 
 Leaf node of the alignment tree, produced for a single primitive value.
@@ -352,6 +352,7 @@ Also produced for `idScope` and `ref` primitives.
 | `pred` | `Any` | *(required)* | The predicted primitive value. |
 | `kind` | `str` | '' | `"id"` for `idScope` fields, `"ref"` for `ref` fields, `"null"` when one or both of `gold`/`pred` is `None`, and `""` otherwise. Surfaced as `"marker"` in the debug tree when non-empty. |
 | `confidence` | `float` | 1.0 | Per-pair stability score in `[0, 1]` from the enclosing Hungarian matching (key-pair confidence for keys of a `MatchDict`, item-pair confidence for items of a `MatchList` with `kind="reorder"`). `1.0` for leaves whose parent did not run a Hungarian assignment, and `1.0` for excess/missing pairs. Populated only when the owning `ObjectAligner` was constructed with `compute_confidence=True`. |
+| `aux` | `collections.abc.Mapping[str, typing.Any] | None` | None | Optional per-leaf metadata that downstream consumers (repair, feedback, describe) read without re-computing it. Currently set only for `kind="ref"` leaves: a mapping `{"mapped_pred": <pred-space id> | None}` carrying the bijection-resolved pred-space id corresponding to `gold`. `None` for all other leaves and for ref leaves that ran in a masked context. Surfaced as `"aux"` in the debug tree when non-`None`. |
 
 ### `MatchList`
 <!-- anchor: matchlist -->
@@ -566,7 +567,7 @@ semantics. See [`docs/repair.md`](../repair.md) for the full
 | `op` | `str` | *(required)* | One of `"add"` / `"remove"` / `"replace"`. |
 | `path` | `str` | *(required)* | RFC 6901 JSON Pointer locating the patch site. |
 | `score_delta` | `float` | *(required)* | Positive — how much of the deficit `1 - S` applying this op would close (approximate, v1). |
-| `kind` | `str` | *(required)* | Finer discriminator (`primitive_replace`, `key_add`, `list_item_missing`, `ref_fix`, `null_value_replace`, `pairing_ambiguous`, etc.). |
+| `kind` | `str` | *(required)* | Finer discriminator (`primitive_replace`, `key_add`, `list_item_missing`, `ref_fix`, `ref_fix_no_target`, `null_value_replace`, `pairing_ambiguous`, etc.). `ref_fix_no_target` is emitted when the gold referent has no counterpart in the prediction under the derived bijection; its `value` carries the gold-side id as a best-effort apply-time replacement (works in concert with a sibling `list_item_missing` op), but feedback / describe templates do not surface that value so no gold-space id leaks into user-visible text. |
 | `value` | `Any` | None | For `add` / `replace` ops, the value to write. |
 | `gold` | `Any` | None | Gold value at the patch site (informational, useful for rendering feedback). |
 | `pred` | `Any` | None | Predicted value at the patch site (informational). |
@@ -647,7 +648,7 @@ differentiates ``describe`` from ``feedback``).
 | `path` | `str` | *(required)* | Indicative JSON Pointer at this node. For ``order: "align"`` lists the path stops at the list itself (children share the list path) because Hungarian-matched indices are not stable; for fixed/prefix lists the index is included. |
 | `depth` | `int` | *(required)* | 0-indexed nesting depth (matches the visual indent depth). |
 | `match_kind` | `str` | *(required)* | One of ``"item"``, ``"list"``, ``"dict"``, ``"key"``, ``"ref"``, ``"id"``, or ``"ambiguous"`` (opt-in low-confidence container marker emitted only when ``include_ambiguous=True``). |
-| `outcome` | `str` | *(required)* | One of ``"match"``, ``"mismatch"``, ``"excess"``, ``"missing"``, ``"ambiguous"``. |
+| `outcome` | `str` | *(required)* | One of ``"match"``, ``"mismatch"``, ``"excess"``, ``"missing"``, ``"ambiguous"``, ``"no_target"`` (the last is ref-only — emitted when the gold referent has no counterpart in the prediction under the derived bijection). |
 | `score` | `float` | *(required)* | Similarity in ``[0, 1]`` at this node. |
 | `text` | `str` | *(required)* | Rendered template body for this node. May be ``""`` for silenced templates (default ``describe.id.match`` / ``describe.id.mismatch`` are empty). |
 | `confidence` | `float` | 1.0 | Stability of the pairing that produced this node in ``[0, 1]``. Inherited from the originating Match node and always populated. ``1.0`` everywhere when ``compute_confidence=False`` on the owning ``ObjectAligner``. |
@@ -676,7 +677,7 @@ result`` yields ``DescriptionEntry``s in match-tree traversal order.
 ### `DEFAULT_DESCRIPTION_TEMPLATES` (constant)
 <!-- anchor: default_description_templates-constant -->
 
-Type: `dict`. Dict with 22 keys.
+Type: `dict`. Dict with 23 keys.
 
 Default template strings live under `src/object_aligner/templates/`. Import this name and pass it (or an override dict) into `ObjectAligner(...)` to customize.
 
@@ -772,7 +773,7 @@ yields `FeedbackEntry`s in visible-rank order.
 ### `DEFAULT_FEEDBACK_TEMPLATES` (constant)
 <!-- anchor: default_feedback_templates-constant -->
 
-Type: `dict`. Dict with 21 keys.
+Type: `dict`. Dict with 22 keys.
 
 Default template strings live under `src/object_aligner/templates/`. Import this name and pass it (or an override dict) into `ObjectAligner(...)` to customize.
 

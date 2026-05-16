@@ -57,8 +57,15 @@ class RepairOp:
         score_delta: Positive — how much of the deficit `1 - S` applying
             this op would close (approximate, v1).
         kind: Finer discriminator (`primitive_replace`, `key_add`,
-            `list_item_missing`, `ref_fix`, `null_value_replace`,
-            `pairing_ambiguous`, etc.).
+            `list_item_missing`, `ref_fix`, `ref_fix_no_target`,
+            `null_value_replace`, `pairing_ambiguous`, etc.).
+            `ref_fix_no_target` is emitted when the gold referent has no
+            counterpart in the prediction under the derived bijection; its
+            `value` carries the gold-side id as a best-effort apply-time
+            replacement (works in concert with a sibling
+            `list_item_missing` op), but feedback / describe templates do
+            not surface that value so no gold-space id leaks into
+            user-visible text.
         value: For `add` / `replace` ops, the value to write.
         gold: Gold value at the patch site (informational, useful for
             rendering feedback).
@@ -362,26 +369,52 @@ def _walk_item(
         )
         return
 
-    # ref leaves: wrong → ref_fix; right → no op.
+    # ref leaves: emit ref_fix when the bijection resolves to a concrete
+    # pred-space id, ref_fix_no_target when it does not. The mapped pred id
+    # rides on `node.aux["mapped_pred"]` (populated by `_align_helper`); we
+    # fall back to a re-lookup against `state.mappings` if a caller built the
+    # match tree by hand without `aux`.
     if kind == "ref":
         if node.score == 1.0:
             return
-        ref_scope = schema.get("ref") if isinstance(schema, dict) else None
         mapped_pred_id = None
-        if ref_scope and ref_scope in state.mappings:
-            mapped_pred_id = state.mappings[ref_scope].get(node.gold)
-        state.ops.append(
-            RepairOp(
-                op=_OP_REPLACE,
-                path=path,
-                value=mapped_pred_id if mapped_pred_id is not None else node.gold,
-                score_delta=c_parent * (1.0 - node.score),
-                kind="ref_fix",
-                gold=node.gold,
-                pred=node.pred,
-                confidence=float(node.confidence),
+        if node.aux is not None and "mapped_pred" in node.aux:
+            mapped_pred_id = node.aux["mapped_pred"]
+        else:
+            ref_scope = schema.get("ref") if isinstance(schema, dict) else None
+            if ref_scope and ref_scope in state.mappings:
+                mapped_pred_id = state.mappings[ref_scope].get(node.gold)
+        if mapped_pred_id is not None:
+            state.ops.append(
+                RepairOp(
+                    op=_OP_REPLACE,
+                    path=path,
+                    value=mapped_pred_id,
+                    score_delta=c_parent * (1.0 - node.score),
+                    kind="ref_fix",
+                    gold=node.gold,
+                    pred=node.pred,
+                    confidence=float(node.confidence),
+                )
             )
-        )
+        else:
+            # No pred-space counterpart for the gold referent under the
+            # derived bijection. Carry `value=node.gold` so apply_to chained
+            # with the sibling list_item_missing op can still reach 1.0; the
+            # feedback / describe templates do not surface `value` for this
+            # op kind, so no gold-space id leaks into user-visible text.
+            state.ops.append(
+                RepairOp(
+                    op=_OP_REPLACE,
+                    path=path,
+                    value=node.gold,
+                    score_delta=c_parent * (1.0 - node.score),
+                    kind="ref_fix_no_target",
+                    gold=node.gold,
+                    pred=node.pred,
+                    confidence=float(node.confidence),
+                )
+            )
         return
 
     # Standard primitive leaf.

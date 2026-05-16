@@ -20,8 +20,18 @@
 "describe.item.match"     = "{indent}The predicted value \"{pred}\" exactly matches the gold.\n"
 "describe.item.mismatch"  = "{indent}The predicted value \"{pred}\" does not match the gold \"{gold}\" (score={score_pct}).\n"
 
-"describe.ref.match"      = "{indent}The predicted reference \"{pred}\" matches the gold reference \"{gold}\" under the inferred id mapping.\n"
-"describe.ref.mismatch"   = "{indent}The predicted reference \"{pred}\" does not match the gold reference \"{gold}\" under the inferred id mapping (score={score_pct}).\n"
+# Placeholders: indent, pred, score, score_pct
+# Ref rows speak in pred's id space only — gold-space ids are an internal
+# implementation detail of the bijection and never appear here.
+"describe.ref.match"      = "{indent}The predicted reference \"{pred}\" matches under the inferred id mapping.\n"
+# Placeholders: indent, pred, value, score, score_pct
+# `value` is the bijection-resolved pred-space id this reference should
+# point to.
+"describe.ref.mismatch"   = "{indent}The predicted reference \"{pred}\" should be \"{value}\" under the inferred id mapping (score={score_pct}).\n"
+# Placeholders: indent, pred, score, score_pct
+# Emitted when the gold-side referent has no counterpart in the prediction
+# under the derived bijection. No replacement value can be surfaced.
+"describe.ref.no_target"  = "{indent}The predicted reference \"{pred}\" cannot be resolved under the inferred id mapping (score={score_pct}).\n"
 
 # id rows are intentionally empty: id fields exist for referential bookkeeping
 # and should not appear in human-readable description output.

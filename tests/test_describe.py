@@ -211,6 +211,120 @@ def test_describe_invalid_pred_renders_validation_error_text():
 
 
 # -----------------------------------------------------------------------------
+# Ref leaves: pred-space output, no gold-space id leakage
+# -----------------------------------------------------------------------------
+
+_REF_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "nodes": {
+            "type": "array",
+            "order": "align",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "id":    {"type": "integer", "idScope": "node"},
+                    "color": {"type": "string", "score": "exact"},
+                },
+            },
+        },
+        "edges": {
+            "type": "array",
+            "order": "align",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "source": {"type": "integer", "ref": "node"},
+                    "target": {"type": "integer", "ref": "node"},
+                },
+            },
+        },
+    },
+}
+
+
+def test_describe_ref_match_omits_gold_id():
+    """When pred and gold refs align under the bijection, the describe row
+    for the ref names only the pred-space id. Uses two edges so we can
+    introduce a mismatch elsewhere to force describe to walk the full tree
+    (perfect overall match short-circuits the walker).
+    """
+    aligner = ObjectAligner(_REF_SCHEMA)
+    gold = {
+        "nodes": [{"id": 0, "color": "blue"}, {"id": 1, "color": "green"}],
+        "edges": [
+            {"source": 0, "target": 1},
+            {"source": 1, "target": 0},
+        ],
+    }
+    pred = {
+        "nodes": [{"id": 10, "color": "blue"}, {"id": 11, "color": "green"}],
+        "edges": [
+            {"source": 10, "target": 11},  # matches gold edge 0
+            {"source": 10, "target": 10},  # mismatch — forces full walk
+        ],
+    }
+    dr = aligner.describe(gold, pred)
+    matching_refs = [e for e in dr.entries
+                     if e.match_kind == "ref" and e.outcome == "match"]
+    assert matching_refs  # at least one ref matched
+    for e in matching_refs:
+        # The match-row template uses only `{pred}`; gold-space ids ("0" /
+        # "1") must not leak in. (Pred-space ids "10" / "11" may appear.)
+        assert "\"0\"" not in e.text
+        assert "\"1\"" not in e.text
+
+
+def test_describe_ref_mismatch_uses_pred_space_value_not_gold():
+    aligner = ObjectAligner(_REF_SCHEMA)
+    gold = {
+        "nodes": [{"id": 0, "color": "blue"}, {"id": 1, "color": "green"}],
+        "edges": [{"source": 0, "target": 1}],
+    }
+    # Pred has the right structure but the edge target points to the wrong
+    # node (pred-10 = blue ≡ gold-0, pred-11 = green ≡ gold-1; edge target=10
+    # is the blue one, but the bijection-mapped gold target ≡ pred-11).
+    pred = {
+        "nodes": [{"id": 10, "color": "blue"}, {"id": 11, "color": "green"}],
+        "edges": [{"source": 10, "target": 10}],
+    }
+    dr = aligner.describe(gold, pred)
+    mismatch = next(e for e in dr.entries
+                    if e.match_kind == "ref" and e.outcome == "mismatch")
+    assert "11" in mismatch.text  # pred-space replacement value
+    assert "should be" in mismatch.text
+    # Gold-space ids ("0", "1") must not leak into describe.
+    assert "\"0\"" not in mismatch.text
+    assert "\"1\"" not in mismatch.text
+
+
+def test_describe_ref_no_target_outcome_for_dangling_gold_ref():
+    aligner = ObjectAligner(_REF_SCHEMA)
+    gold = {
+        "nodes": [
+            {"id": 0, "color": "blue"},
+            {"id": 1, "color": "green"},
+            {"id": 9, "color": "red"},
+        ],
+        "edges": [{"source": 0, "target": 9}],
+    }
+    pred = {
+        "nodes": [
+            {"id": 0, "color": "blue"},
+            {"id": 1, "color": "green"},
+        ],
+        "edges": [{"source": 0, "target": 1}],
+    }
+    dr = aligner.describe(gold, pred)
+    no_target = [e for e in dr.entries
+                 if e.match_kind == "ref" and e.outcome == "no_target"]
+    assert len(no_target) == 1
+    assert "cannot be resolved" in no_target[0].text
+    # Gold-space id ("9") never appears in user-facing describe text.
+    assert "9" not in no_target[0].text
+
+
+# -----------------------------------------------------------------------------
 # Sanity: dataclasses are frozen
 # -----------------------------------------------------------------------------
 

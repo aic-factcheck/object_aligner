@@ -18,8 +18,9 @@ LEGACY_DESCRIBE = {
     "describe.intro.imperfect": "The predicted output scores overall {score_pct}, let us align the predicted output to the gold and analyze the differences:\n",
     "describe.item.match": '{indent}The predicted value "{pred}" exactly matches the gold.\n',
     "describe.item.mismatch": '{indent}The predicted value "{pred}" does not match the gold "{gold}" (score={score_pct}).\n',
-    "describe.ref.match": '{indent}The predicted reference "{pred}" matches the gold reference "{gold}" under the inferred id mapping.\n',
-    "describe.ref.mismatch": '{indent}The predicted reference "{pred}" does not match the gold reference "{gold}" under the inferred id mapping (score={score_pct}).\n',
+    "describe.ref.match": '{indent}The predicted reference "{pred}" matches under the inferred id mapping.\n',
+    "describe.ref.mismatch": '{indent}The predicted reference "{pred}" should be "{value}" under the inferred id mapping (score={score_pct}).\n',
+    "describe.ref.no_target": '{indent}The predicted reference "{pred}" cannot be resolved under the inferred id mapping (score={score_pct}).\n',
     "describe.id.match": "",
     "describe.id.mismatch": "",
     "describe.null.match": "{indent}Both the predicted and gold values are null here.\n",
@@ -79,8 +80,11 @@ LEGACY_FEEDBACK = {
         "{rank}. {list_path}: list has extraneous item {pred}. "
         "Removing it recovers +{score_delta:.3f}.",
     "feedback.op.ref_fix":
-        "{rank}. {path}: wrong reference (expected {gold}, got {pred}). "
+        "{rank}. {path}: wrong reference (got {pred}, change to {value}). "
         "Fixing this recovers +{score_delta:.3f}.",
+    "feedback.op.ref_fix_no_target":
+        "{rank}. {path}: reference {pred} cannot be resolved against any "
+        "entity in the prediction. Recovers +{score_delta:.3f}.",
     "feedback.op.subtree_replace":
         "{rank}. {path}: subtree differs. "
         "Replacing it recovers +{score_delta:.3f}.",
@@ -129,7 +133,9 @@ LEGACY_COMPACT = {
     "feedback.op.list_item_excess":
         "{rank}. {list_path}: remove item {pred} [+{score_delta:.3f}]",
     "feedback.op.ref_fix":
-        "{rank}. {path}: ref {pred}->{gold} [+{score_delta:.3f}]",
+        "{rank}. {path}: ref {pred}->{value} [+{score_delta:.3f}]",
+    "feedback.op.ref_fix_no_target":
+        "{rank}. {path}: ref {pred} unresolved [+{score_delta:.3f}]",
     "feedback.op.subtree_replace":
         "{rank}. {path}: replace subtree [+{score_delta:.3f}]",
     "feedback.op.null_value_replace":

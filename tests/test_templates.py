@@ -37,8 +37,9 @@ def test_description_defaults_have_expected_keys():
 def test_feedback_defaults_have_expected_keys():
     assert set(DEFAULT_FEEDBACK_TEMPLATES) == set(_FEEDBACK_PLACEHOLDERS)
     # 19 fix/intro/synthesis/empty/validation keys + 2 confidence keys
-    # (feedback.op.pairing_ambiguous and feedback.diagnostics.intro).
-    assert len(DEFAULT_FEEDBACK_TEMPLATES) == 21
+    # (feedback.op.pairing_ambiguous and feedback.diagnostics.intro) + 1
+    # ref_fix_no_target.
+    assert len(DEFAULT_FEEDBACK_TEMPLATES) == 22
 
 
 def test_compact_overlay_only_overrides_known_keys():

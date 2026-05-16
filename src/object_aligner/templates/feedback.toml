@@ -47,8 +47,18 @@
 # Placeholders: rank, list_path, pred, score_delta, score_delta_pct
 "feedback.op.list_item_excess" = "{rank}. {list_path}: list has extraneous item {pred}. Removing it recovers +{score_delta:.3f}."
 
-# Placeholders: rank, path, gold, pred, score_delta, score_delta_pct
-"feedback.op.ref_fix" = "{rank}. {path}: wrong reference (expected {gold}, got {pred}). Fixing this recovers +{score_delta:.3f}."
+# Placeholders: rank, path, pred, value, score_delta, score_delta_pct
+# `value` is the bijection-resolved replacement in the prediction's own
+# id space (never a gold-space id), so the line is directly actionable
+# without leaking the gold object.
+"feedback.op.ref_fix" = "{rank}. {path}: wrong reference (got {pred}, change to {value}). Fixing this recovers +{score_delta:.3f}."
+
+# Placeholders: rank, path, pred, score_delta, score_delta_pct
+# Emitted when the gold-side referent has no counterpart in the
+# prediction under the derived bijection. The fix cannot be made by
+# replacement alone — a sibling list_item_missing op adds the missing
+# entity. No gold-space id is surfaced.
+"feedback.op.ref_fix_no_target" = "{rank}. {path}: reference {pred} cannot be resolved against any entity in the prediction. Recovers +{score_delta:.3f}."
 
 # Placeholders: rank, path, score_delta, score_delta_pct
 "feedback.op.subtree_replace" = "{rank}. {path}: subtree differs. Replacing it recovers +{score_delta:.3f}."

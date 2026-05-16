@@ -65,6 +65,7 @@ _OP_KIND_HUMAN = {
     "list_item_missing": "missing-list-item",
     "list_item_excess": "extraneous-list-item",
     "ref_fix": "reference",
+    "ref_fix_no_target": "unresolved-reference",
     "subtree_replace": "subtree",
     "null_value_replace": "null-value",
 }
@@ -132,7 +133,10 @@ _FEEDBACK_PLACEHOLDERS = {
         "rank", "list_path", "pred", "score_delta", "score_delta_pct",
     ),
     "feedback.op.ref_fix": _op_placeholders(
-        "rank", "path", "gold", "pred", "score_delta", "score_delta_pct",
+        "rank", "path", "pred", "value", "score_delta", "score_delta_pct",
+    ),
+    "feedback.op.ref_fix_no_target": _op_placeholders(
+        "rank", "path", "pred", "score_delta", "score_delta_pct",
     ),
     "feedback.op.subtree_replace": _op_placeholders(
         "rank", "path", "score_delta", "score_delta_pct",
@@ -522,7 +526,9 @@ def _render_entry_text(
     elif op.kind == "list_item_excess":
         kwargs.update(list_path=op.path, pred=pred_str)
     elif op.kind == "ref_fix":
-        kwargs.update(path=op.path, gold=gold_str, pred=pred_str)
+        kwargs.update(path=op.path, pred=pred_str, value=_format_value(op.value, fmt))
+    elif op.kind == "ref_fix_no_target":
+        kwargs.update(path=op.path, pred=pred_str)
     elif op.kind == "subtree_replace":
         kwargs.update(path=op.path)
     elif op.kind == "null_value_replace":

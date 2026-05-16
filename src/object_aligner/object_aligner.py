@@ -34,6 +34,14 @@ class MatchItem:
             parent did not run a Hungarian assignment, and `1.0` for
             excess/missing pairs. Populated only when the owning
             `ObjectAligner` was constructed with `compute_confidence=True`.
+        aux: Optional per-leaf metadata that downstream consumers
+            (repair, feedback, describe) read without re-computing it.
+            Currently set only for `kind="ref"` leaves: a mapping
+            `{"mapped_pred": <pred-space id> | None}` carrying the
+            bijection-resolved pred-space id corresponding to `gold`.
+            `None` for all other leaves and for ref leaves that ran in
+            a masked context. Surfaced as `"aux"` in the debug tree
+            when non-`None`.
     """
 
     score: float
@@ -41,6 +49,7 @@ class MatchItem:
     pred: Any
     kind: str = ""
     confidence: float = 1.0
+    aux: Mapping[str, Any] | None = None
 
     def __post_init__(self):
         object.__setattr__(self, "score", float(self.score))
@@ -1453,7 +1462,10 @@ class ObjectAligner:
                     score = 1.0
                 else:
                     score = 0.0
-                return {"gold": g, "pred": p, "match": MatchItem(score=score, gold=g, pred=p, kind="ref")}
+                return {"gold": g, "pred": p, "match": MatchItem(
+                    score=score, gold=g, pred=p, kind="ref",
+                    aux={"mapped_pred": mapped},
+                )}
         if g is None or p is None:
             return self._align_null(g, p, schema)
         schema_type = schema.get("type")
@@ -1494,6 +1506,8 @@ class ObjectAligner:
                 out["marker"] = aligned.kind
             if abs(float(aligned.confidence) - 1.0) > 1e-12:
                 out["confidence"] = float(aligned.confidence)
+            if aligned.aux is not None:
+                out["aux"] = {k: to_python_value(v) for k, v in aligned.aux.items()}
             return out
 
         if isinstance(aligned, MatchList):

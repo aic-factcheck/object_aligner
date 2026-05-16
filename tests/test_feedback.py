@@ -400,6 +400,171 @@ def test_renders_ref_fix():
     assert "wrong reference" in fb.text
 
 
+def test_ref_fix_text_is_pred_space_only():
+    """The ref_fix line surfaces the pred-space replacement value, not the
+    gold-space id, and never includes the gold id in the rendered text.
+    Guards against gold leaking into prompt-optimizer feedback (GEPA hides
+    gold from the optimizer).
+    """
+    schema = {
+        "type": "object",
+        "keyScore": "exact",
+        "properties": {
+            "entities": {
+                "type": "array",
+                "order": "align",
+                "items": {
+                    "type": "object",
+                    "keyScore": "exact",
+                    "properties": {
+                        "id":   {"type": "string", "idScope": "entity"},
+                        "name": {"type": "string", "score": "exact"},
+                    },
+                },
+            },
+            "primary": {"type": "string", "ref": "entity"},
+        },
+    }
+    gold = {
+        "entities": [
+            {"id": "g1", "name": "Alice"},
+            {"id": "g2", "name": "Bob"},
+        ],
+        "primary": "g1",
+    }
+    pred = {
+        "entities": [
+            {"id": "p1", "name": "Alice"},
+            {"id": "p2", "name": "Bob"},
+        ],
+        "primary": "p2",  # points at Bob; gold expects Alice
+    }
+    aligner = ObjectAligner(schema)
+    fb = aligner.feedback(gold, pred)
+    ref_entry = next(e for e in fb.entries if e.op_kind == "ref_fix")
+    # The pred-space replacement value (`p1`, the bijection image of gold
+    # `g1`) appears in the rendered text; the gold-space id (`g1`) does not.
+    assert "p1" in ref_entry.text
+    assert "g1" not in ref_entry.text
+    assert "g2" not in ref_entry.text
+    # The synthesis-line bucket is "reference", not "unresolved-reference".
+    assert "reference errors" in fb.text
+
+
+def test_ref_fix_no_target_emitted_when_gold_referent_missing():
+    """When gold references a definer that has no counterpart in pred under
+    the derived bijection, the op kind is `ref_fix_no_target` and the text
+    explains that the reference cannot be resolved — without leaking any
+    gold-space id.
+    """
+    schema = {
+        "type": "object",
+        "properties": {
+            "nodes": {
+                "type": "array",
+                "order": "align",
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "id":    {"type": "integer", "idScope": "node"},
+                        "color": {"type": "string", "score": "exact"},
+                    },
+                },
+            },
+            "edges": {
+                "type": "array",
+                "order": "align",
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "source": {"type": "integer", "ref": "node"},
+                        "target": {"type": "integer", "ref": "node"},
+                    },
+                },
+            },
+        },
+    }
+    aligner = ObjectAligner(schema)
+    gold = {
+        "nodes": [
+            {"id": 0, "color": "blue"},
+            {"id": 1, "color": "green"},
+            {"id": 9, "color": "red"},
+        ],
+        "edges": [{"source": 0, "target": 9}],
+    }
+    pred = {
+        "nodes": [
+            {"id": 0, "color": "blue"},
+            {"id": 1, "color": "green"},
+        ],
+        "edges": [{"source": 0, "target": 1}],
+    }
+    fb = aligner.feedback(gold, pred)
+    no_target = [e for e in fb.entries if e.op_kind == "ref_fix_no_target"]
+    assert len(no_target) == 1
+    entry = no_target[0]
+    assert entry.path == "/edges/0/target"
+    assert "cannot be resolved" in entry.text
+    # No gold-space id ("9") leaks into the user-visible text.
+    assert "9" not in entry.text
+    # Synthesis line buckets ref_fix_no_target under "unresolved-reference".
+    assert "unresolved-reference" in fb.text
+
+
+def test_ref_fix_no_target_apply_to_still_chains_to_one():
+    """apply_to() carries the gold-side id as a best-effort replacement on
+    ref_fix_no_target ops so that, combined with the sibling
+    list_item_missing op, the joint apply still reaches score 1.0.
+    """
+    schema = {
+        "type": "object",
+        "properties": {
+            "nodes": {
+                "type": "array",
+                "order": "align",
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "id":    {"type": "integer", "idScope": "node"},
+                        "color": {"type": "string", "score": "exact"},
+                    },
+                },
+            },
+            "edges": {
+                "type": "array",
+                "order": "align",
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "source": {"type": "integer", "ref": "node"},
+                        "target": {"type": "integer", "ref": "node"},
+                    },
+                },
+            },
+        },
+    }
+    aligner = ObjectAligner(schema)
+    gold = {
+        "nodes": [
+            {"id": 0, "color": "blue"},
+            {"id": 1, "color": "green"},
+            {"id": 9, "color": "red"},
+        ],
+        "edges": [{"source": 0, "target": 9}],
+    }
+    pred = {
+        "nodes": [
+            {"id": 0, "color": "blue"},
+            {"id": 1, "color": "green"},
+        ],
+        "edges": [{"source": 0, "target": 1}],
+    }
+    r = aligner.repair(gold, pred)
+    patched = r.apply_to(pred)
+    assert aligner.metric(gold, patched)["score"] == pytest.approx(1.0)
+
+
 def test_renders_subtree_replace():
     aligner = ObjectAligner(FLAT_DICT_SCHEMA)
     fb = aligner.feedback(
@@ -867,11 +1032,12 @@ def test_to_dict_round_trips_basic_types():
     assert d["text"] == fb.text
 
 
-def test_default_feedback_templates_has_21_keys():
+def test_default_feedback_templates_has_22_keys():
     # 19 op/intro/synthesis/empty/validation keys + 2 confidence keys
     # (feedback.op.pairing_ambiguous and feedback.diagnostics.intro)
-    # added in the confidence (cluster 4) release.
-    assert len(DEFAULT_FEEDBACK_TEMPLATES) == 21
+    # added in the confidence (cluster 4) release + 1 ref_fix_no_target
+    # added in the pred-space-ref-feedback change.
+    assert len(DEFAULT_FEEDBACK_TEMPLATES) == 22
 
 
 def test_feedback_invalid_pred_renders_validation_error_text():
