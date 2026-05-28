@@ -21,7 +21,7 @@ chapters use to deep-link into this page.
 <!-- anchor: objectaligner -->
 
 ```python
-ObjectAligner(schema, *, custom_metrics=None, generate_description=False, description_templates=None, description_style='default', generate_feedback=False, feedback_templates=None, feedback_style='gepa', dominant_fraction_threshold=0.6, warn_on_ambiguous_mapping=False, compute_confidence=False, confidence_method='margin', confidence_entropy_temperature=8.0)
+ObjectAligner(schema, *, custom_metrics=None, generate_description=False, description_templates=None, description_style='default', generate_feedback=False, feedback_templates=None, feedback_style='gepa', dominant_fraction_threshold=0.6, warn_on_ambiguous_mapping=False, compute_confidence=False, confidence_method='margin', confidence_entropy_temperature=8.0, id_disambiguation='wl', wl_integration='tie_break', wl_rounds=None, wl_blend_lambda=0.5)
 ```
 
 Aligns a gold object against a predicted object under a schema.
@@ -54,10 +54,14 @@ See [`docs/concepts.md`](../concepts.md) for the architectural tour.
 - **`compute_confidence`** — If `True`, populate the `confidence` field on `MatchItem` / `MatchList` / `MatchDict` from the similarity matrix used at each Hungarian site (`order: "align"` lists and dict-key matching). Default `False` keeps `confidence == 1.0` everywhere, which preserves byte-identical output for `feedback()` and `describe()` under default flags. See [`docs/confidence.md`](../confidence.md).
 - **`confidence_method`** — `"margin"` (default) or `"entropy"`. Selects the per-pair confidence formula. Margin is a fast linear pass over the similarity matrix; entropy softmaxes each row and reports `1 - H / log m`.
 - **`confidence_entropy_temperature`** — Softmax temperature `β` used only when `confidence_method="entropy"`. Defaults to `8.0`, which puts a Jaro 0.95 vs 0.80 at roughly a 3:1 probability ratio on `[0, 1]`-bounded similarities.
+- **`id_disambiguation`** — Strategy for resolving the per-scope `idScope` bijection when definer items are not fully distinguished by their own properties. `"wl"` (default) runs Weisfeiler–Leman color refinement over the same-scope ref graph, computed independently per side, so structurally distinct definers align by structure rather than emission order. `"none"` reproduces the pre-WL behavior exactly (property-only cost plus an arbitrary tie-break). See [`docs/referential.md`](../referential.md).
+- **`wl_integration`** — How the structural color enters the cost matrix when `id_disambiguation="wl"`. `"tie_break"` (default) lets the color break only *exact* ties in the property cost, so already-determined alignments never move. `"blend"` mixes the property cost and structural agreement with weight `wl_blend_lambda`, letting structure override near-tied (but not exactly tied) property costs.
+- **`wl_rounds`** — Cap on WL refinement rounds. `None` (default) runs to a stable partition (at most `|definers|` rounds).
+- **`wl_blend_lambda`** — Blend weight `λ ∈ [0, 1]` consulted only when `wl_integration="blend"`; the combined cost is `(1 - λ)·property_cost + λ·structural_term`. Defaults to `0.5`. Ignored under `"tie_break"`.
 
 **Raises**
 
-- **`ValueError`** — If `custom_metrics` contains an unsupported schema type, collides with a built-in metric name, `feedback_style` is not a registered style, or `description_style` is not a registered style.
+- **`ValueError`** — If `custom_metrics` contains an unsupported schema type, collides with a built-in metric name, `feedback_style` is not a registered style, `description_style` is not a registered style, `id_disambiguation` / `wl_integration` is not a registered value, `wl_rounds` is negative or not an int/None, or `wl_blend_lambda` is not a finite float in `[0, 1]`.
 - **`jsonschema.SchemaError`** — If `schema` itself is not a valid JSON Schema.
 
 #### `ObjectAligner.align()`

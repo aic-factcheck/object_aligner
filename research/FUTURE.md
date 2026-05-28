@@ -94,3 +94,33 @@ previously appeared in more than one place collapse to a single entry.
 - **Cross-encoder rerankers.** Different protocol shape — single call
   takes `(a, b)` and returns a score directly. Worth a separate
   `Reranker` protocol if it becomes a priority.
+
+---
+
+## Referential id disambiguation (WL)
+
+The default `id_disambiguation="wl"` ships 1-WL color refinement with
+`tie_break` / `blend` integration (string selector only). Doors left open by
+that design:
+
+- **Callable strategy protocol.** Promote `id_disambiguation` to accept a
+  `Callable` implementing an `IdDisambiguationStrategy` protocol
+  (`cost_terms(scope, gold_items, pred_items, *, ref_graph_gold,
+  ref_graph_pred, resolved_scopes) -> CostContribution`) so experiment-side
+  or learned matchers plug in without forking. The string registry
+  (`{"none","wl"}`) is the v1 surface; `{"ref_informed","k_wl"}` are reserved.
+- **Ref-informed bijection** (`id_disambiguation="ref_informed"`): a
+  joint/fixpoint or QAP-style solve that maximizes edge agreement directly,
+  seeded by WL colors. Strictly stronger than 1-WL on
+  symmetric-but-non-automorphic cases; more expensive and approximate.
+- **`k`-WL** (`"k_wl"`): tighter than 1-WL on the documented blind spots
+  (6-cycle vs two 3-cycles), at higher cost.
+- **Graded structural agreement.** Replace the binary same-token indicator
+  `w ∈ {0,1}` with a graded `w ∈ [0,1]` keyed on the refinement round at
+  which two vertices' colors diverged, giving `blend` a softer signal.
+- **Float / `number` labels via exact.** WL labels currently exclude floats
+  to avoid rounding noise; add an opt-in (e.g. a `wlExact` property flag) to
+  include a numeric edge attribute by exact equality.
+- **Nested-scalar labels.** The carrier label reads the carrier's *direct*
+  exactly-comparable children only; deepen the walk if structure buried under
+  nested objects needs to disambiguate.

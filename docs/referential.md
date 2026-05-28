@@ -350,11 +350,51 @@ gold reference involving that id scores `0`.
 
 ---
 
-## Example 6 — property-twin ambiguity
+## Example 6 — property-twins and structural disambiguation
 
-When two definer items are indistinguishable by their own non-id, non-ref
-properties, the Hungarian cost matrix has tied rows — there are multiple
-optimal bijections and Object Aligner picks one arbitrarily:
+This example uses a different schema (people referenced from group member
+lists):
+
+```python
+schema = {
+    "type": "object",
+    "properties": {
+        "people": {
+            "type": "array",
+            "order": "align",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "id":   {"type": "integer", "idScope": "person"},
+                    "name": {"type": "string"},
+                    "age":  {"type": "integer"},
+                },
+            },
+        },
+        "groups": {
+            "type": "array",
+            "order": "align",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "name":    {"type": "string"},
+                    "members": {
+                        "type": "array",
+                        "order": "align",
+                        "items": {"type": "integer", "ref": "person"},
+                    },
+                },
+            },
+        },
+    },
+}
+```
+
+When two definer items share all of their own non-id, non-ref properties the
+property cost matrix has tied rows. By default Object Aligner runs
+**Weisfeiler–Leman (WL) color refinement** over the same-scope ref graph and
+uses the resulting structural color to break those ties, so twins that are
+*structurally* distinct align deterministically:
 
 ```python
 gold = {
@@ -371,23 +411,40 @@ pred = {
     ],
     "groups": [{"name": "g", "members": [10]}],
 }
+aligner = ObjectAligner(schema)        # id_disambiguation="wl" (the default)
+aligner.metric(gold, pred)
+# {'score': 1.0}
 ```
 
-The two Alices are property-twins. If Hungarian pairs `(1↔10, 2↔20)`, the
-membership list matches and the score is `1.0`. If it picks
-`(1↔20, 2↔10)`, the membership list mismatches and the score drops.
+Only one Alice is a group member, so the two are structurally distinguishable:
+WL pins `1↔10` and `2↔20` and the membership list matches.
 
-You can surface this with an opt-in flag:
+A **genuine automorphism** — where swapping the twins is itself a valid
+isomorphism — cannot (and should not) be resolved. WL leaves it ambiguous, and
+the `warn_on_ambiguous_mapping` flag now fires only on this *residual* case:
 
 ```python
+gold = {
+    "people": [{"id": 1,  "name": "Alice", "age": 30},
+               {"id": 2,  "name": "Alice", "age": 30}],
+    "groups": [{"name": "g", "members": [1, 2]}],      # both Alices in the group
+}
+pred = {
+    "people": [{"id": 10, "name": "Alice", "age": 30},
+               {"id": 20, "name": "Alice", "age": 30}],
+    "groups": [{"name": "g", "members": [10, 20]}],
+}
 aligner = ObjectAligner(schema, warn_on_ambiguous_mapping=True)
 aligner.metric(gold, pred)
-# UserWarning: Ambiguous mapping in idScope 'person': gold ids [1, 2]
-#              could be paired multiple ways with equal cost; arbitrary assignment used.
+# UserWarning: Residual ambiguous mapping in idScope 'person' after WL
+#              refinement: gold ids [1, 2] remain structurally
+#              indistinguishable (graph automorphism or 1-WL blind spot);
+#              arbitrary assignment used.
 ```
 
-The warning does not change the assignment; it merely tells you that the
-result is non-deterministic for this input.
+Either pairing yields the same score here, so the residual ambiguity is
+harmless. To reproduce the pre-WL behavior exactly — property-only cost plus an
+arbitrary tie-break — construct the aligner with `id_disambiguation="none"`.
 
 ---
 
@@ -404,10 +461,21 @@ result is non-deterministic for this input.
 3. **Mapping derivation per scope, in topological order**: build the n×m
    cost matrix between gold and pred definer items using the regular
    alignment machinery, with the current scope's id field masked (so two
-   nodes are compared by everything *except* their id), and refs to the
-   current scope masked too (to avoid bootstrapping problems). Refs to
-   already-resolved higher scopes use those scopes' mappings. Run the
-   Hungarian algorithm on `-cost` and read off the bijection.
+   nodes are compared by everything *except* their id). Same-scope refs are
+   not compared directly (that would bootstrap the mapping on itself);
+   instead, when `id_disambiguation="wl"` (the default), they seed a
+   **Weisfeiler–Leman color** computed independently per side. Because the
+   colors are a pure function of each side's local ref structure, no
+   cross-side mapping is needed to compute them — the bootstrap is avoided.
+   The structural color enters the cost matrix according to `wl_integration`:
+   `"tie_break"` (default) breaks only *exact* ties in the property cost, so
+   already-determined alignments never move; `"blend"` mixes property cost
+   and structural agreement with weight $\lambda$ (`wl_blend_lambda`). Refs to
+   already-resolved higher scopes use those scopes' mappings (and feed the WL
+   color as relation labels). Run the Hungarian algorithm on `-cost` and read
+   off the bijection. Passing `id_disambiguation="none"` restores the prior
+   behavior exactly: same-scope refs are masked to `1.0`, the cost is
+   property-only, and ties are broken arbitrarily.
 4. **Main alignment pass**: the regular recursive alignment runs as
    before, with two overrides — `idScope` fields contribute `1.0`
    (treated as labels) and `ref` fields score `1.0` iff
@@ -419,10 +487,17 @@ result is non-deterministic for this input.
 ## Limitations
 
 - **Property-twin ambiguity.** When two definer items are indistinguishable
-  by their own non-id, non-ref properties (and the surrounding referential
-  structure doesn't disambiguate them through already-resolved scopes), the
-  Hungarian assignment is non-unique and the result can vary. A future
-  release may add Weisfeiler–Lehman-style color refinement to disambiguate.
+  by their own non-id, non-ref properties, the default Weisfeiler–Leman
+  refinement resolves them whenever they are *structurally* distinct (e.g.
+  one node has an edge the other does not — see Example 6). Only **genuine
+  automorphisms** (where swapping the twins is itself a valid isomorphism)
+  and the known **1-WL blind spots** (such as one 6-cycle versus two disjoint
+  3-cycles — both 2-regular, so 1-WL assigns every vertex the same color)
+  remain non-unique; for those the assignment is arbitrary but
+  score-invariant, and `warn_on_ambiguous_mapping=True` reports the residual
+  case. `id_disambiguation="none"` disables refinement entirely and restores
+  the pre-WL property-only behavior. Tighter refinement ($k$-WL, ref-informed
+  bijections) is possible future work.
 - **Cycles in the scope dependency graph.** Each cycle member is aligned
   using non-ref properties only; the warning notes the affected scopes.
 - **Primitives only.** Ids must be `string`, `integer`, or `number`. Tuple

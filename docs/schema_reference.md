@@ -97,8 +97,14 @@ Rules and behavior:
 - Pred-side tolerance: duplicate pred ids are first-wins; dangling pred refs
   score `0` in place rather than raising.
 - Strict bijection: each gold id maps to at most one pred id and vice versa.
-  When the cost matrix has ties, the Hungarian algorithm picks arbitrarily;
-  pass `ObjectAligner(..., warn_on_ambiguous_mapping=True)` to surface this.
+- Structural disambiguation: by default (`id_disambiguation="wl"`)
+  attribute-less or property-tied definers are aligned by their **ref
+  structure** via Weisfeiler–Leman color refinement, so graphs match
+  up-to-renumbering rather than up-to-emission-order. Only genuine
+  automorphisms / 1-WL blind spots stay ambiguous; pass
+  `ObjectAligner(..., warn_on_ambiguous_mapping=True)` to surface that
+  residual case. `id_disambiguation="none"` restores property-only cost with
+  an arbitrary tie-break.
 - Cycles in the scope-dependency graph (e.g. scope A's definers contain refs
   to scope B and vice versa) trigger a `UserWarning` and fall back to
   property-only alignment for cycle members.

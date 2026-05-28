@@ -10,6 +10,8 @@ from jsonschema.validators import validator_for
 from rapidfuzz.distance import DamerauLevenshtein, Indel, Jaro, JaroWinkler, LCSseq, Levenshtein, OSA
 from scipy.optimize import linear_sum_assignment
 
+from object_aligner._wl import RefGraph, _RefEdge, wl_tokens
+
 
 @dataclass(frozen=True)
 class MatchItem:
@@ -401,6 +403,10 @@ class ObjectAligner:
         compute_confidence=False,
         confidence_method="margin",
         confidence_entropy_temperature=8.0,
+        id_disambiguation="wl",
+        wl_integration="tie_break",
+        wl_rounds=None,
+        wl_blend_lambda=0.5,
     ):
         """Initialize an `ObjectAligner` for the given schema.
 
@@ -460,12 +466,37 @@ class ObjectAligner:
                 only when `confidence_method="entropy"`. Defaults to `8.0`,
                 which puts a Jaro 0.95 vs 0.80 at roughly a 3:1
                 probability ratio on `[0, 1]`-bounded similarities.
+            id_disambiguation: Strategy for resolving the per-scope
+                `idScope` bijection when definer items are not fully
+                distinguished by their own properties. `"wl"` (default)
+                runs Weisfeiler–Leman color refinement over the same-scope
+                ref graph, computed independently per side, so structurally
+                distinct definers align by structure rather than emission
+                order. `"none"` reproduces the pre-WL behavior exactly
+                (property-only cost plus an arbitrary tie-break). See
+                [`docs/referential.md`](../referential.md).
+            wl_integration: How the structural color enters the cost matrix
+                when `id_disambiguation="wl"`. `"tie_break"` (default) lets
+                the color break only *exact* ties in the property cost, so
+                already-determined alignments never move. `"blend"` mixes
+                the property cost and structural agreement with weight
+                `wl_blend_lambda`, letting structure override near-tied (but
+                not exactly tied) property costs.
+            wl_rounds: Cap on WL refinement rounds. `None` (default) runs to
+                a stable partition (at most `|definers|` rounds).
+            wl_blend_lambda: Blend weight `λ ∈ [0, 1]` consulted only when
+                `wl_integration="blend"`; the combined cost is
+                `(1 - λ)·property_cost + λ·structural_term`. Defaults to
+                `0.5`. Ignored under `"tie_break"`.
 
         Raises:
             ValueError: If `custom_metrics` contains an unsupported schema
                 type, collides with a built-in metric name,
-                `feedback_style` is not a registered style, or
-                `description_style` is not a registered style.
+                `feedback_style` is not a registered style,
+                `description_style` is not a registered style,
+                `id_disambiguation` / `wl_integration` is not a registered
+                value, `wl_rounds` is negative or not an int/None, or
+                `wl_blend_lambda` is not a finite float in `[0, 1]`.
             jsonschema.SchemaError: If `schema` itself is not a valid JSON
                 Schema.
         """
@@ -515,6 +546,38 @@ class ObjectAligner:
         self._compute_confidence = bool(compute_confidence)
         self._confidence_method = confidence_method
         self._confidence_temperature = ct
+
+        if id_disambiguation not in ("none", "wl"):
+            raise ValueError(
+                f"id_disambiguation must be 'none' or 'wl', got {id_disambiguation!r}"
+            )
+        if wl_integration not in ("tie_break", "blend"):
+            raise ValueError(
+                f"wl_integration must be 'tie_break' or 'blend', got {wl_integration!r}"
+            )
+        if wl_rounds is None:
+            wr = None
+        else:
+            if isinstance(wl_rounds, bool):
+                raise ValueError("wl_rounds must be an int or None")
+            try:
+                wr = int(wl_rounds)
+            except (TypeError, ValueError) as e:
+                raise ValueError("wl_rounds must be an int or None") from e
+            if wr < 0:
+                raise ValueError(f"wl_rounds must be >= 0, got {wl_rounds!r}")
+        try:
+            bl = float(wl_blend_lambda)
+        except (TypeError, ValueError) as e:
+            raise ValueError("wl_blend_lambda must be a real number") from e
+        if not np.isfinite(bl) or not (0.0 <= bl <= 1.0):
+            raise ValueError(
+                f"wl_blend_lambda must be finite and in [0, 1], got {wl_blend_lambda!r}"
+            )
+        self._id_disambiguation = id_disambiguation
+        self._wl_integration = wl_integration
+        self._wl_rounds = wr
+        self._wl_blend_lambda = bl
 
         self._validate_importance_sums(schema)
         self._validate_null_scores(schema)
@@ -952,9 +1015,35 @@ class ObjectAligner:
                 except (TypeError, ValueError, KeyError):
                     cost[i][j] = 0.0
 
-        row_ind, col_ind = linear_sum_assignment(-cost)
+        wl_active = (
+            self._id_disambiguation == "wl"
+            and not scope.degraded
+            and (n > 1 or m > 1)
+        )
+        if wl_active:
+            gold_tokens, pred_tokens = wl_tokens(
+                self._build_ref_graph(gold, scope, ctx, is_gold=True),
+                self._build_ref_graph(pred, scope, ctx, is_gold=False),
+                mode=self._wl_integration,
+                rounds=self._wl_rounds,
+            )
+            w = np.zeros((d, d))
+            for i in range(n):
+                gtok = gold_tokens.get(gold_id_list[i])
+                if gtok is None:
+                    continue
+                for j in range(m):
+                    if pred_tokens.get(pred_id_list[j]) == gtok:
+                        w[i][j] = 1.0
+            score_matrix = self._apply_wl(cost, w, n, m)
+        else:
+            score_matrix = cost
 
-        self._maybe_warn_ambiguity(cost, n, m, gold_id_list, scope.scope)
+        row_ind, col_ind = linear_sum_assignment(-score_matrix)
+
+        self._maybe_warn_ambiguity(
+            score_matrix, n, m, gold_id_list, scope.scope, wl_active=wl_active
+        )
 
         mapping = {}
         matched_pred_ids = set()
@@ -977,24 +1066,221 @@ class ObjectAligner:
         excess = all_pred_ids - matched_pred_ids
         return mapping, excess
 
-    def _maybe_warn_ambiguity(self, cost, n, m, gold_id_list, scope_name):
+    def _maybe_warn_ambiguity(self, matrix, n, m, gold_id_list, scope_name, *, wl_active=False):
+        # `matrix` is the cost matrix actually fed to the Hungarian step: the
+        # raw property cost under `id_disambiguation="none"`, or the
+        # WL-integrated score matrix under `"wl"`. Two equal rows therefore
+        # signal *residual* ambiguity in the WL case — pairs WL could not
+        # separate (genuine automorphisms or 1-WL blind spots).
         if not self._warn_on_ambiguous_mapping or n < 2:
             return
         seen = {}
         ambiguous = set()
         for i in range(n):
-            key = tuple(cost[i, :m].tolist()) if m > 0 else ()
+            key = tuple(matrix[i, :m].tolist()) if m > 0 else ()
             if key in seen:
                 ambiguous.add(gold_id_list[seen[key]])
                 ambiguous.add(gold_id_list[i])
             else:
                 seen[key] = i
         ambiguous.discard(None)
-        if ambiguous:
+        if not ambiguous:
+            return
+        ids = sorted(ambiguous, key=repr)
+        if wl_active:
             warnings.warn(
-                f"Ambiguous mapping in idScope '{scope_name}': gold ids {sorted(ambiguous, key=repr)} could be paired multiple ways with equal cost; arbitrary assignment used.",
+                f"Residual ambiguous mapping in idScope '{scope_name}' after WL "
+                f"refinement: gold ids {ids} remain structurally indistinguishable "
+                f"(graph automorphism or 1-WL blind spot); arbitrary assignment used.",
                 UserWarning,
             )
+        else:
+            warnings.warn(
+                f"Ambiguous mapping in idScope '{scope_name}': gold ids {ids} could "
+                f"be paired multiple ways with equal cost; arbitrary assignment used.",
+                UserWarning,
+            )
+
+    # ------------------------------------------------------------------
+    # Weisfeiler–Leman id disambiguation (id_disambiguation="wl").
+    # The pure refinement lives in object_aligner._wl; the methods below
+    # build the per-side ref graph from the schema + instance + already
+    # resolved higher-scope mappings, and fold the resulting structural
+    # colors into the cost matrix.
+    # ------------------------------------------------------------------
+    def _apply_wl(self, cost, w, n, m):
+        """Fold the WL agreement matrix ``w`` into the property cost.
+
+        ``cost`` and ``w`` are ``d×d`` score matrices (higher = better);
+        ``w[i][j] == 1`` iff gold item ``i`` and pred item ``j`` carry the
+        same stable WL token. Returns the score matrix for the Hungarian step.
+        """
+        if self._wl_integration == "blend":
+            lam = self._wl_blend_lambda
+            return (1.0 - lam) * cost + lam * w
+        # tie_break: add eps*w with eps strictly below the smallest positive
+        # gap among distinct property scores, so any pair already separated by
+        # content keeps its ranking — only exact ties are broken by structure.
+        sub = cost[:n, :m]
+        vals = np.unique(sub)
+        if vals.size >= 2:
+            positive = np.diff(vals)
+            positive = positive[positive > 0]
+            min_gap = float(positive.min()) if positive.size else 1.0
+        else:
+            min_gap = 1.0
+        eps = min_gap / (n * m + 1.0)
+        out = cost.copy()
+        out[:n, :m] = sub + eps * w[:n, :m]
+        return out
+
+    @staticmethod
+    def _path_under(path, prefix):
+        """True iff ``prefix`` is a strict prefix of ``path``."""
+        return len(path) > len(prefix) and path[: len(prefix)] == prefix
+
+    def _carrier_path(self, ref_path):
+        """Schema path of the carrier object that "owns" a ref site.
+
+        The carrier is the shortest prefix of ``ref_path`` whose schema node
+        is an ``object`` sitting as an array item (ends in ``("items",)`` /
+        ``("prefixItems", n)``). For an edge object ``{source, target}`` this is
+        the edge item (so both refs group into one directed relation); for a
+        scalar ``members[*]`` ref array this is the *group* item (so co-members
+        form one k-ary relation, not isolated unary tags). Falls back to the
+        ref's enclosing array — and finally to the ref's parent — when no such
+        object-array-item ancestor exists.
+        """
+        for i in range(1, len(ref_path) + 1):
+            edge = ref_path[i - 1]
+            is_array_item = edge == ("items",) or (
+                isinstance(edge, tuple) and edge and edge[0] == "prefixItems"
+            )
+            if not is_array_item:
+                continue
+            node = self._get_schema_node(self.schema, ref_path[:i])
+            if isinstance(node, dict) and _schema_allows_type(node.get("type"), "object"):
+                return ref_path[:i]
+        enclosing = self._enclosing_array_path(ref_path)
+        return enclosing if enclosing is not None else ref_path[:-1]
+
+    @staticmethod
+    def _is_exact_comparable(node):
+        """True for schema nodes compared by exact equality in WL labels.
+
+        Allows ``string`` / ``integer`` / ``boolean`` and any node with an
+        ``enum``; excludes floats (``number``) so structurally identical edges
+        are not split by rounding noise, and excludes id/ref primitives (they
+        carry no comparable raw value across sides).
+        """
+        if not isinstance(node, dict):
+            return False
+        if node.get("idScope") is not None or node.get("ref") is not None:
+            return False
+        if "enum" in node:
+            return True
+        return node.get("type") in ("string", "integer", "boolean")
+
+    def _exact_scalars(self, obj, obj_schema):
+        """Sorted tuple of an object's direct-child exactly-comparable scalars."""
+        if not isinstance(obj, dict) or not isinstance(obj_schema, dict):
+            return ()
+        props = obj_schema.get("properties")
+        if not isinstance(props, dict):
+            return ()
+        triples = []
+        for key, child in props.items():
+            if not self._is_exact_comparable(child) or key not in obj:
+                continue
+            val = obj[key]
+            if isinstance(val, (dict, list)):
+                continue
+            triples.append((type(val).__name__, key, val))
+        return tuple(sorted(triples, key=repr))
+
+    def _carrier_label(self, carrier_obj, carrier_path, scope, ctx, is_gold):
+        """Build the (hashable, repr-sortable) label for a carrier relation.
+
+        Combines the carrier's own exactly-comparable scalars (e.g. an edge
+        ``type``) with any refs it carries to an *already-resolved higher*
+        scope. The higher-scope target is mapped to pred space on the gold
+        side and taken raw on the pred side, so identical cross-scope structure
+        yields identical labels on both sides without bootstrapping the current
+        scope.
+        """
+        carrier_schema = self._get_schema_node(self.schema, carrier_path)
+        label = list(self._exact_scalars(carrier_obj, carrier_schema))
+        for other_name, other_scope in self._id_scopes.items():
+            if other_name == scope.scope or other_name not in ctx.current_mappings:
+                continue
+            mapping = ctx.current_mappings[other_name]
+            for ref_path in other_scope.ref_paths:
+                if not self._path_under(ref_path, carrier_path):
+                    continue
+                rel = ref_path[len(carrier_path):]
+                for val, _ in self._walk_data(carrier_obj, rel):
+                    resolved = mapping.get(val) if is_gold else val
+                    label.append(("xref", other_name, repr(rel), resolved))
+        return tuple(sorted(label, key=repr))
+
+    @staticmethod
+    def _emit_incidences(endpoints, label, graph, hub_counter):
+        """Append the incidences for one carrier relation to ``graph``.
+
+        ``endpoints`` is a list of ``(role, vertex_id)`` already filtered to
+        known vertices. A single endpoint becomes a unary self-tag; exactly two
+        endpoints with *distinct* roles become a directed edge (e.g.
+        ``source → target``); everything else (symmetric collections such as
+        ``members``, or higher arity) stars to a fresh per-carrier hub vertex so
+        the relation is order-invariant and stays within 1-WL.
+        """
+        if not endpoints:
+            return
+        roles = {role for role, _ in endpoints}
+        if len(endpoints) == 1:
+            role, vid = endpoints[0]
+            graph.incidences.append(_RefEdge(src=vid, dst=vid, role=("unary", role), label=label))
+            return
+        if len(endpoints) == 2 and len(roles) == 2:
+            (r0, a), (r1, b) = sorted(endpoints, key=lambda rv: repr(rv[0]))
+            graph.incidences.append(_RefEdge(src=a, dst=b, role=("edge", r0, r1), label=label))
+            return
+        hub = ("__hub__", hub_counter[0])
+        hub_counter[0] += 1
+        graph.vertices[hub] = ()
+        for role, vid in endpoints:
+            graph.incidences.append(_RefEdge(src=vid, dst=hub, role=("member", role), label=label))
+
+    def _build_ref_graph(self, instance, scope, ctx, *, is_gold):
+        """Build the per-side directed labeled ref graph for ``scope``."""
+        suffix = scope.definer_schema_path[len(scope.definer_array_path):]
+        item_schema = self._get_schema_node(self.schema, scope.definer_array_path)
+        want_scalars = self._wl_integration == "blend"
+
+        graph = RefGraph()
+        for item, _ in self._walk_data(instance, scope.definer_array_path):
+            vid = next((v for v, _ in self._walk_data(item, suffix)), None)
+            if vid is None or vid in graph.vertices:
+                continue
+            graph.vertices[vid] = self._exact_scalars(item, item_schema) if want_scalars else ()
+
+        groups = {}
+        for ref_path in scope.ref_paths:
+            carrier_path = self._carrier_path(ref_path)
+            groups.setdefault(carrier_path, []).append(ref_path[len(carrier_path):])
+
+        hub_counter = [0]
+        for carrier_path, role_remainders in groups.items():
+            role_remainders = sorted(role_remainders, key=repr)
+            for carrier_obj, _ in self._walk_data(instance, carrier_path):
+                endpoints = []
+                for rel in role_remainders:
+                    for val, _ in self._walk_data(carrier_obj, rel):
+                        if val in graph.vertices:
+                            endpoints.append((rel, val))
+                label = self._carrier_label(carrier_obj, carrier_path, scope, ctx, is_gold)
+                self._emit_incidences(endpoints, label, graph, hub_counter)
+        return graph
 
     def _align_primitive(self, g, p, schema, *, schema_type, default_score):
         score_type = schema.get("score", default_score)

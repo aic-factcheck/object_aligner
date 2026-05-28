@@ -444,32 +444,37 @@ TWIN_SCHEMA = {
 }
 
 
-def test_property_twin_ambiguity_with_warning_emits_warning():
+# Both Alices are members of the same group: a genuine automorphism that WL
+# cannot (and should not) separate — swapping the two Alices is a valid
+# isomorphism. This survives WL refinement as residual ambiguity.
+TWIN_AUTOMORPHISM_GOLD = {
+    "people": [
+        {"id": 1, "name": "Alice", "age": 30},
+        {"id": 2, "name": "Alice", "age": 30},
+    ],
+    "groups": [{"name": "g", "members": [1, 2]}],
+}
+TWIN_AUTOMORPHISM_PRED = {
+    "people": [
+        {"id": 10, "name": "Alice", "age": 30},
+        {"id": 20, "name": "Alice", "age": 30},
+    ],
+    "groups": [{"name": "g", "members": [10, 20]}],
+}
+
+
+def test_property_twin_residual_ambiguity_after_wl_emits_warning():
+    # Under the WL default, the warning fires only on ambiguity that survives
+    # refinement, and its text says so.
     aligner = ObjectAligner(TWIN_SCHEMA, warn_on_ambiguous_mapping=True)
-    gold = {
-        "people": [
-            {"id": 1, "name": "Alice", "age": 30},
-            {"id": 2, "name": "Alice", "age": 30},
-        ],
-        "groups": [
-            {"name": "g", "members": [1]},
-        ],
-    }
-    pred = {
-        "people": [
-            {"id": 10, "name": "Alice", "age": 30},
-            {"id": 20, "name": "Alice", "age": 30},
-        ],
-        "groups": [
-            {"name": "g", "members": [10]},
-        ],
-    }
-    with pytest.warns(UserWarning, match="Ambiguous mapping"):
-        aligner.metric(gold, pred)
+    with pytest.warns(UserWarning, match="Residual ambiguous mapping.*after WL"):
+        aligner.metric(TWIN_AUTOMORPHISM_GOLD, TWIN_AUTOMORPHISM_PRED)
 
 
-def test_warn_on_ambiguous_mapping_off_by_default():
-    aligner = ObjectAligner(TWIN_SCHEMA)
+def test_property_twin_resolved_by_wl_does_not_warn():
+    # Asymmetric reference: only one Alice is in the group, so WL distinguishes
+    # them structurally and the (previously fired) warning is now silent.
+    aligner = ObjectAligner(TWIN_SCHEMA, warn_on_ambiguous_mapping=True)
     gold = {
         "people": [
             {"id": 1, "name": "Alice", "age": 30},
@@ -486,7 +491,37 @@ def test_warn_on_ambiguous_mapping_off_by_default():
     }
     with warnings.catch_warnings():
         warnings.simplefilter("error")
+        assert aligner.metric(gold, pred)["score"] == 1.0
+
+
+def test_none_strategy_emits_legacy_ambiguity_warning():
+    # id_disambiguation="none" reproduces the pre-WL warning text verbatim.
+    aligner = ObjectAligner(
+        TWIN_SCHEMA, warn_on_ambiguous_mapping=True, id_disambiguation="none"
+    )
+    gold = {
+        "people": [
+            {"id": 1, "name": "Alice", "age": 30},
+            {"id": 2, "name": "Alice", "age": 30},
+        ],
+        "groups": [{"name": "g", "members": [1]}],
+    }
+    pred = {
+        "people": [
+            {"id": 10, "name": "Alice", "age": 30},
+            {"id": 20, "name": "Alice", "age": 30},
+        ],
+        "groups": [{"name": "g", "members": [10]}],
+    }
+    with pytest.warns(UserWarning, match="Ambiguous mapping in idScope"):
         aligner.metric(gold, pred)
+
+
+def test_warn_on_ambiguous_mapping_off_by_default():
+    aligner = ObjectAligner(TWIN_SCHEMA)
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")
+        aligner.metric(TWIN_AUTOMORPHISM_GOLD, TWIN_AUTOMORPHISM_PRED)
 
 
 # ---------------------------------------------------------------------------
@@ -766,3 +801,229 @@ def test_metric_is_safe_to_call_concurrently_on_one_instance():
         results = list(ex.map(run, range(32)))
 
     assert all(r == baseline for r in results)
+
+
+# ---------------------------------------------------------------------------
+# 11) Weisfeiler–Leman id disambiguation (id_disambiguation="wl")
+# ---------------------------------------------------------------------------
+
+# Attribute-less directed graph: nodes carry only their id, so the bijection
+# can only be decided by structure (this is the case the WL feature fixes).
+GRAPH_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "nodes": {
+            "type": "array",
+            "order": "align",
+            "items": {
+                "type": "object",
+                "properties": {"id": {"type": "integer", "idScope": "node"}},
+            },
+        },
+        "edges": {
+            "type": "array",
+            "order": "align",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "source": {"type": "integer", "ref": "node"},
+                    "target": {"type": "integer", "ref": "node"},
+                },
+            },
+        },
+    },
+}
+
+# Attribute-less membership graph: people referenced from group member lists.
+MEMBERSHIP_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "people": {
+            "type": "array",
+            "order": "align",
+            "items": {
+                "type": "object",
+                "properties": {"id": {"type": "integer", "idScope": "person"}},
+            },
+        },
+        "groups": {
+            "type": "array",
+            "order": "align",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "members": {
+                        "type": "array",
+                        "order": "align",
+                        "items": {"type": "integer", "ref": "person"},
+                    },
+                },
+            },
+        },
+    },
+}
+
+
+def _path_graph(ids):
+    return {
+        "nodes": [{"id": i} for i in ids],
+        "edges": [{"source": a, "target": b} for a, b in zip(ids, ids[1:])],
+    }
+
+
+def test_reversed_emission_path_is_fixed_by_wl():
+    # The motivating bug: a structurally-perfect path whose nodes are emitted
+    # in reverse order. WL recovers the structural bijection; "none" degrades
+    # to positional (emission-order) alignment.
+    gold = _path_graph([0, 1, 2, 3])
+    pred = {
+        "nodes": [{"id": 3}, {"id": 2}, {"id": 1}, {"id": 0}],
+        "edges": [{"source": 0, "target": 1}, {"source": 1, "target": 2}, {"source": 2, "target": 3}],
+    }
+    wl = ObjectAligner(GRAPH_SCHEMA)
+    none = ObjectAligner(GRAPH_SCHEMA, id_disambiguation="none")
+    assert wl.metric(gold, pred)["score"] == 1.0
+    assert none.metric(gold, pred)["score"] < 1.0
+
+
+def test_shifted_ids_in_order_unchanged_between_wl_and_none():
+    # Structurally correct pred emitted in canonical order: positional and
+    # structural alignment agree, so both strategies score 1.0.
+    gold = _path_graph([0, 1, 2, 3])
+    pred = _path_graph([100, 101, 102, 103])
+    wl = ObjectAligner(GRAPH_SCHEMA)
+    none = ObjectAligner(GRAPH_SCHEMA, id_disambiguation="none")
+    assert wl.metric(gold, pred)["score"] == 1.0
+    assert none.metric(gold, pred)["score"] == 1.0
+
+
+def test_wl_score_is_invariant_to_node_emission_order():
+    gold = _path_graph([0, 1, 2, 3])
+    pred_a = _path_graph([10, 11, 12, 13])
+    pred_b = {
+        "nodes": [{"id": 12}, {"id": 10}, {"id": 13}, {"id": 11}],
+        "edges": [{"source": 10, "target": 11}, {"source": 11, "target": 12}, {"source": 12, "target": 13}],
+    }
+    wl = ObjectAligner(GRAPH_SCHEMA)
+    assert wl.metric(gold, pred_a)["score"] == wl.metric(gold, pred_b)["score"] == 1.0
+
+
+def test_directed_cycle_is_score_invariant_under_rotation():
+    gold = {
+        "nodes": [{"id": 0}, {"id": 1}, {"id": 2}],
+        "edges": [{"source": 0, "target": 1}, {"source": 1, "target": 2}, {"source": 2, "target": 0}],
+    }
+    pred = {
+        "nodes": [{"id": 0}, {"id": 1}, {"id": 2}],
+        "edges": [{"source": 1, "target": 2}, {"source": 2, "target": 0}, {"source": 0, "target": 1}],
+    }
+    wl = ObjectAligner(GRAPH_SCHEMA)
+    assert wl.metric(gold, pred)["score"] == 1.0
+
+
+def test_self_loop_and_parallel_edges_align_structurally():
+    # Node 0 has a self-loop and a doubled edge to node 1; node 2 is a sink.
+    def build(ids):
+        a, b, c = ids
+        return {
+            "nodes": [{"id": a}, {"id": b}, {"id": c}],
+            "edges": [
+                {"source": a, "target": a},
+                {"source": a, "target": b},
+                {"source": a, "target": b},
+                {"source": b, "target": c},
+            ],
+        }
+
+    gold = build([0, 1, 2])
+    pred = {  # same graph, ids renamed and nodes/edges emitted out of order
+        "nodes": [{"id": 7}, {"id": 9}, {"id": 5}],
+        "edges": [
+            {"source": 5, "target": 9},
+            {"source": 5, "target": 5},
+            {"source": 9, "target": 7},
+            {"source": 5, "target": 9},
+        ],
+    }
+    wl = ObjectAligner(GRAPH_SCHEMA)
+    assert wl.metric(gold, pred)["score"] == 1.0
+
+
+def test_k_ary_membership_resolves_across_emission_order():
+    # Two groups of different sizes -> WL separates the size-3 members from the
+    # size-2 members even though every person is attribute-less. The pred is
+    # laid out so positional ("none") alignment maps the size-3 members onto a
+    # mix of both groups, breaking the memberships.
+    gold = {
+        "people": [{"id": i} for i in (0, 1, 2, 3, 4)],
+        "groups": [{"members": [0, 1, 2]}, {"members": [3, 4]}],
+    }
+    pred = {
+        "people": [{"id": i} for i in (10, 11, 12, 13, 14)],
+        "groups": [{"members": [12, 13, 14]}, {"members": [10, 11]}],
+    }
+    wl = ObjectAligner(MEMBERSHIP_SCHEMA)
+    none = ObjectAligner(MEMBERSHIP_SCHEMA, id_disambiguation="none")
+    assert wl.metric(gold, pred)["score"] == 1.0
+    assert none.metric(gold, pred)["score"] < 1.0
+
+
+def test_six_cycle_vs_two_triangles_warns_residual_under_wl():
+    six = {
+        "nodes": [{"id": i} for i in range(6)],
+        "edges": [{"source": i, "target": (i + 1) % 6} for i in range(6)],
+    }
+    two_triangles = {
+        "nodes": [{"id": i} for i in range(6)],
+        "edges": [
+            {"source": 0, "target": 1}, {"source": 1, "target": 2}, {"source": 2, "target": 0},
+            {"source": 3, "target": 4}, {"source": 4, "target": 5}, {"source": 5, "target": 3},
+        ],
+    }
+    aligner = ObjectAligner(GRAPH_SCHEMA, warn_on_ambiguous_mapping=True)
+    with pytest.warns(UserWarning, match="Residual ambiguous mapping.*after WL"):
+        aligner.metric(six, two_triangles)
+
+
+def test_tie_break_does_not_change_distinguishable_alignments():
+    # People carry names/ages, so the cost matrix is already determined; the
+    # WL tie-break adds only a sub-gap epsilon and must not move anything. The
+    # full debug tree is therefore byte-identical to "none".
+    wl = ObjectAligner(RELATIONS_SCHEMA)
+    none = ObjectAligner(RELATIONS_SCHEMA, id_disambiguation="none")
+    wl_out = wl.metric(PARENT_CHILD_GOLD, PARENT_CHILD_PRED_RENAMED, debug=True)
+    none_out = none.metric(PARENT_CHILD_GOLD, PARENT_CHILD_PRED_RENAMED, debug=True)
+    assert wl_out["score"] == none_out["score"]
+    assert wl_out["debug"] == none_out["debug"]
+
+
+def test_blend_lambda_endpoints():
+    gold = _path_graph([0, 1, 2, 3])
+    pred = {
+        "nodes": [{"id": 3}, {"id": 2}, {"id": 1}, {"id": 0}],
+        "edges": [{"source": 0, "target": 1}, {"source": 1, "target": 2}, {"source": 2, "target": 3}],
+    }
+    none_score = ObjectAligner(GRAPH_SCHEMA, id_disambiguation="none").metric(gold, pred)["score"]
+    blend0 = ObjectAligner(GRAPH_SCHEMA, wl_integration="blend", wl_blend_lambda=0.0)
+    blend1 = ObjectAligner(GRAPH_SCHEMA, wl_integration="blend", wl_blend_lambda=1.0)
+    assert blend0.metric(gold, pred)["score"] == none_score  # lambda=0 -> property-only
+    assert blend1.metric(gold, pred)["score"] == 1.0          # lambda=1 -> pure structural
+
+
+@pytest.mark.parametrize(
+    "kwargs",
+    [
+        {"id_disambiguation": "bogus"},
+        {"wl_integration": "bogus"},
+        {"wl_rounds": -1},
+        {"wl_rounds": "x"},
+        {"wl_rounds": True},
+        {"wl_blend_lambda": 1.5},
+        {"wl_blend_lambda": -0.1},
+        {"wl_blend_lambda": "x"},
+        {"wl_blend_lambda": float("inf")},
+    ],
+)
+def test_wl_constructor_validation(kwargs):
+    with pytest.raises(ValueError):
+        ObjectAligner(GRAPH_SCHEMA, **kwargs)
