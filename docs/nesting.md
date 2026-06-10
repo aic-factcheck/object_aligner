@@ -235,7 +235,6 @@ schema = {
                             "items": {"type": "string", "score": "jaro"},
                             "order": "align",
                             "ignoreExcess": True,
-                            "ignoreMissing": True,
                             "valueWeight": 1.0
                         }
                     },
@@ -264,7 +263,7 @@ Design highlights:
 
 - **Top-level** `order: "align"` pairs students by best overall match
 - **Subjects** also use `order: "align"` — "Mathematics" in gold pairs with "Math" in pred via Jaro
-- **Comments** use `ignoreExcess` + `ignoreMissing` so slight differences don't kill the score
+- **Comments** use `ignoreExcess` so extra predicted comments don't kill the score
 - **Grades** use `invdiff` with high `valueWeight` — getting close to the right grade matters most
 
 ---
@@ -281,7 +280,7 @@ Design highlights:
 
 5. **Set thresholds** to prevent garbage pairings. A `keyThreshold` of 0.5 prevents "age" from matching "title".
 
-6. **Use `ignoreExcess`/`ignoreMissing`** for open-ended lists where over- or under-generation shouldn't be heavily penalized.
+6. **Use `ignoreExcess` *or* `ignoreMissing`** for open-ended lists where over- or under-generation shouldn't be heavily penalized. They are mutually exclusive — setting both on one array raises `ValueError` (the combination would reward omitting items; see [`lists.md`](lists.md)).
 
 ---
 

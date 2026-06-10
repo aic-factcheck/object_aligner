@@ -464,6 +464,13 @@ def test_include_empty_positions_filters_dual_none_sentinels():
     paths_unfiltered = {e.path for e in result_unfiltered.entries}
     assert "/2" not in paths_filtered
     assert "/2" in paths_unfiltered
+    # The both-absent position is vacuous: identical inputs score 1.0 and the
+    # sentinel entry carries zero weight and zero contribution.
+    assert result_filtered.score == pytest.approx(1.0)
+    assert abs(result_filtered.residual) < EPS_TIGHT
+    sentinel = next(e for e in result_unfiltered.entries if e.path == "/2")
+    assert sentinel.weight == 0.0
+    assert sentinel.contribution == 0.0
     # When unfiltered, sum is exactly deficit.
     total_unfilt = sum(e.contribution for e in result_unfiltered.entries)
     assert abs(total_unfilt - (1 - result_unfiltered.score)) < EPS_TIGHT

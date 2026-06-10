@@ -217,19 +217,26 @@ def test_type_mismatch_softens_to_zero_under_skip_validation(gold, pred):
         }
 
     aligner = ObjectAligner(schema)
-    # With skip_validation=True the caller opted into looser semantics;
-    # type-mismatched values score 0 rather than raising. The dict's
-    # overall score may still be non-zero if the key match contributes.
+    # Type-mismatched values score 0 rather than raising — with or without
+    # skip_validation, so align() and metric() agree on the same inputs. The
+    # dict's overall score may still be non-zero if the key match contributes.
     match = aligner.align(gold, pred, skip_validation=True)
     value_matches = list(match.children.values())
     assert len(value_matches) == 1
     assert value_matches[0].score == 0.0
 
-    # Without skip_validation the schema-side validation catches the bad
-    # pred before alignment reaches the type-mismatch branch.
-    from jsonschema import ValidationError
-    with pytest.raises((ValidationError, TypeError)):
-        aligner.align(gold, pred)
+    if "colour" in gold:
+        # Schema-valid input (pred's "color" is an undeclared extra key under
+        # the open-world JSON Schema default): align() soft-zeros it too.
+        match = aligner.align(gold, pred)
+        assert list(match.children.values())[0].score == 0.0
+        assert aligner.metric(gold, pred)["score"] == match.score
+    else:
+        # Here the pred value is declared and actually invalid, so schema
+        # validation still rejects it before alignment.
+        from jsonschema import ValidationError
+        with pytest.raises(ValidationError):
+            aligner.align(gold, pred)
 
 
 def test_dict_property_one_sided_none_used_to_raise_typeerror():
@@ -249,3 +256,42 @@ def test_dict_property_one_sided_none_used_to_raise_typeerror():
     leaf = list(match.children.values())[0]
     assert leaf.score == 0.6
     assert leaf.kind == "null"
+
+
+def test_undeclared_gold_key_warns_and_scores_zero_instead_of_crashing():
+    # Open-world JSON Schema (additionalProperties defaults to true) lets
+    # gold carry keys never declared in `properties`. The aligner used to
+    # crash with KeyError; now the pair soft-zeros with a UserWarning.
+    schema = {"type": "object", "properties": {"date": {"type": "string"}}}
+    aligner = ObjectAligner(schema)
+    gold = {"date": "2024", "note": "hi"}
+    pred = {"date": "2024", "note": "hi"}
+
+    with pytest.warns(UserWarning, match="'note' is not declared"):
+        result = aligner.metric(gold, pred)
+    # The undeclared pair scores 0 at weight 1.0 next to the matched "date".
+    assert result["score"] == pytest.approx(0.5)
+
+    with pytest.warns(UserWarning, match="'note' is not declared"):
+        match = aligner.align(gold, pred)
+    assert match.score == pytest.approx(result["score"])
+
+
+def test_object_schema_without_properties_does_not_crash():
+    aligner = ObjectAligner({"type": "object"})
+    with pytest.warns(UserWarning, match="not declared"):
+        result = aligner.metric({"a": "x"}, {"a": "x"})
+    assert result["score"] == 0.0
+
+
+def test_align_and_metric_agree_on_fuzzy_paired_type_mismatch():
+    # jaro("date", "rate") > 0 pairs the keys; the values' Python types
+    # differ. metric() always soft-zeroed this; align() used to raise
+    # TypeError on the same schema-valid input. They now agree.
+    schema = {"type": "object", "properties": {"date": {"type": "string"}}}
+    aligner = ObjectAligner(schema)
+    gold = {"date": "2024"}
+    pred = {"rate": 5}
+
+    assert aligner.metric(gold, pred)["score"] == 0.0
+    assert aligner.align(gold, pred).score == 0.0

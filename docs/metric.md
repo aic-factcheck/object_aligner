@@ -124,7 +124,6 @@ schema = {
             "items": {"type": "string", "score": "jaro", "threshold": 0.5},
             "order": "align",
             "ignoreExcess": True,
-            "ignoreMissing": True,
             "valueWeight": 1.0,
         },
     },

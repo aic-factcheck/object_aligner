@@ -141,6 +141,27 @@ class _SchemaMixin:
         walk(schema, [])
 
     @staticmethod
+    def _validate_ignore_flags(schema):
+        """Pre-walk the schema and raise ``ValueError`` if any array node
+        sets both ``ignoreExcess`` and ``ignoreMissing``. The combination
+        would score the mean over matched pairs only, which rewards omitting
+        hard items (a strictly closer prediction can score lower); it is
+        rejected at construction instead of emitting a gameable score."""
+
+        def walk(node, schema_path):
+            if not isinstance(node, dict):
+                return
+            if node.get("ignoreExcess") and node.get("ignoreMissing"):
+                raise ValueError(
+                    "'ignoreExcess' and 'ignoreMissing' cannot both be true at "
+                    f"{path2str([str(e) for e in schema_path])}"
+                )
+            for child, child_path in _SchemaMixin._iter_schema_children(node, schema_path):
+                walk(child, child_path)
+
+        walk(schema, [])
+
+    @staticmethod
     def _validate_null_scores(schema):
         """Pre-walk the schema and raise ``ValueError`` if any ``nullScore``
         is not a real number in ``[0, 1]``. Walks ``properties`` / ``items``

@@ -45,14 +45,15 @@ Custom primitive metrics are supplied through `ObjectAligner(..., custom_metrics
 
 | Keyword | Type | Default | Description |
 |---------|------|---------|-------------|
-| `score` ⚡ | string | `"invdiff"` | `"invdiff"`, `"exact"`, or a registered custom metric name |
+| `score` ⚡ | string | `"invdiff"` | `"invdiff"`, `"exact"`, `"relative"`, or a registered custom metric name |
 | `threshold` ⚡ | float | `0.0` | Scores below this value are set to `0.0` |
 
 ### Score functions
 
 | Value | Formula / implementation | Use when |
 |-------|---------------------------|----------|
-| `"invdiff"` | `1 / (1 + |a - b|)` | Continuous values where closeness matters |
+| `"invdiff"` | `1 / (1 + |a - b|)` | Small-integer domains where a difference of 1 is meaningful (counts, days). Depends on the field's absolute scale. |
+| `"relative"` | `1 - min(1, |a - b| / max(|a|, |b|))`; equal values → `1.0` | Quantities with arbitrary magnitude (prices, measurements) — scale-invariant |
 | `"exact"` | `1.0 if a == b else 0.0` | Categorical integers, identifiers |
 | custom name | User-provided `(gold, pred) -> float` | Domain-specific numeric scoring |
 
@@ -144,8 +145,8 @@ downstream surface (`MatchItem.kind == "null"`,
 | `prefixItems` ⚡ | list[object] | — | Per-position schemas for the fixed-length prefix. Each element is a schema object. |
 | `prefixWeights` ⚡ | list[float] | all `1.0` | Weight for each prefix position. Length must match `prefixItems`. Normalized internally. |
 | `order` ⚡ | string | `"fixed"` | Alignment strategy for `items`: `"fixed"` (DP sequence alignment) or `"align"` (Hungarian reordering) |
-| `ignoreExcess` ⚡ | bool | `false` | If true, extra predicted items don't count toward normalization denominator |
-| `ignoreMissing` ⚡ | bool | `false` | If true, missing gold items don't count toward normalization denominator |
+| `ignoreExcess` ⚡ | bool | `false` | If true, extra predicted items don't count toward normalization denominator. Mutually exclusive with `ignoreMissing` (both → `ValueError` at construction). |
+| `ignoreMissing` ⚡ | bool | `false` | If true, missing gold items don't count toward normalization denominator. Mutually exclusive with `ignoreExcess`. |
 | `prefixImportance` ⚡ | float | — | Weight of prefix score in combined prefix+items score. **Required** when both `prefixItems` and `items` are present. |
 | `restImportance` ⚡ | float | — | Weight of tail (`items`) score. **Required** when both `prefixItems` and `items` are present. |
 
@@ -155,6 +156,8 @@ When both are present:
 - The first `len(prefixItems)` elements are aligned positionally (with weights)
 - The remaining elements are aligned according to `order`
 - The final score is: `(prefixImportance * prefixScore + restImportance * restScore) / (prefixImportance + restImportance)`
+
+Prefix positions absent from **both** sides are vacuous: they are excluded from the prefix-weight normalization (the match tree keeps a `kind="absent"` sentinel child), so identical inputs score `1.0` even when shorter than `prefixItems`. With `prefixItems` but no `items` schema, content beyond the prefix length is silently unscored. Prefix positions ignore `ignoreExcess` / `ignoreMissing`. See [`lists.md`](lists.md#caveats).
 
 ### Fixed-order alignment details
 
@@ -181,6 +184,8 @@ Uses the Hungarian algorithm (via `scipy.optimize.linear_sum_assignment`):
 | `keyThreshold` ⚡ | float | `0.0` | Minimum key similarity to form a pairing; pairs below this are treated as unaligned |
 | `keyImportance` ⚡ | float | `0.0` | Weight of key score in the final dict score. Default `0.0` means keys are *scaffolding*, not data — set to `1` (or higher) when the model also chooses the keys (open-vocabulary extraction, map-as-data dicts). See [`dicts.md`](dicts.md#key-importance) for guidance. |
 | `valueImportance` ⚡ | float | `1.0` | Weight of value score in the final dict score |
+
+Aligned value pairs whose Python types differ score `0.0` in place (no exception); pairs whose gold key is not declared in `properties` score `0.0` at weight `1.0` and emit a `UserWarning`. For closed-world scoring set `"additionalProperties": false`. See [`dicts.md`](dicts.md#keys-not-declared-in-properties).
 
 ---
 

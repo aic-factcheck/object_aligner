@@ -92,6 +92,20 @@ INVARIANT_FIXTURES = [
     (
         {
             "type": "array",
+            "prefixItems": [
+                {"type": "string"},
+                {"type": "integer", "score": "exact"},
+                {"type": "string"},
+            ],
+            "prefixWeights": [2.0, 1.0, 1.0],
+        },
+        ["foo", 1],
+        ["foe", 2],
+        "prefix list with both-absent tail position",
+    ),
+    (
+        {
+            "type": "array",
             "prefixItems": [{"type": "string"}, {"type": "string"}],
             "items": {"type": "string", "score": "exact"},
             "prefixImportance": 1.0,

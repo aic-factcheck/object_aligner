@@ -364,7 +364,7 @@ Signatures and parameter docs are also reachable from the generated
   subclass, not in the library.
 - **Token-level metrics (BERTScore etc.) are not in v1.** The protocol
   allows 2-D embeddings already; the metric implementation is the
-  thing that needs to be written. Tracked in `research/FUTURE.md`.
+  thing that needs to be written.
 - **Concurrent writers on the SQLite cache.** WAL mode handles
   multiple processes safely. Multiple threads in the same process
   share a single connection (we open it with

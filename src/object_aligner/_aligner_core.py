@@ -4,6 +4,8 @@ Mixed into ``ObjectAligner``. The recursive ``_align_*`` family plus the
 ``_align_helper`` dispatcher and the ``_serialize_match_debug`` debug-tree
 serializer.
 """
+import warnings
+
 import numpy as np
 from scipy.optimize import linear_sum_assignment
 
@@ -111,7 +113,11 @@ class _CoreAlignMixin:
 
         D = self._list_norm(aligned_gold, aligned_pred, schema)
         if D == 0:
-            score = 1.0 if len(aligned_scores) == 0 else 0.0
+            # D == 0 means every unmatched entry was ignored (or there were
+            # no entries at all): a vacuous match. Matched pairs always count
+            # in D, and ignoreExcess/ignoreMissing are mutually exclusive at
+            # construction, so no content can hide behind D == 0.
+            score = 1.0
         else:
             score = float(np.sum([s.score for s in aligned_scores])) / D
         score = max(0.0, min(1.0, score))
@@ -122,16 +128,22 @@ class _CoreAlignMixin:
         if n == 0 and m == 0:
             return {"gold": [], "pred": [], "match": MatchList(score=1.0, children=[], kind="fixed")}
         if n == 0:
+            # Every pred item is excess; with ignoreExcess none of them
+            # counts, so the match is vacuous (consistent with the D == 0
+            # rule on the main path).
+            score = 1.0 if schema.get("ignoreExcess", False) else 0.0
             return {
                 "gold": [None] * m,
                 "pred": pred,
-                "match": MatchList(score=0.0, children=[MatchItem(score=0.0, gold=None, pred=e) for e in pred], kind="fixed"),
+                "match": MatchList(score=score, children=[MatchItem(score=0.0, gold=None, pred=e) for e in pred], kind="fixed"),
             }
         if m == 0:
+            # Every gold item is missing; vacuous under ignoreMissing.
+            score = 1.0 if schema.get("ignoreMissing", False) else 0.0
             return {
                 "gold": gold,
                 "pred": [None] * n,
-                "match": MatchList(score=0.0, children=[MatchItem(score=0.0, gold=e, pred=None) for e in gold], kind="fixed"),
+                "match": MatchList(score=score, children=[MatchItem(score=0.0, gold=e, pred=None) for e in gold], kind="fixed"),
             }
         dp = np.zeros((n + 1, m + 1))
         subs = np.zeros((n + 1, m + 1), dtype=object)
@@ -208,7 +220,9 @@ class _CoreAlignMixin:
             raise RuntimeError("internal: aligned gold/pred length mismatch")
         D = self._list_norm(aligned_gold, aligned_pred, schema)
         if D == 0:
-            score = 1.0 if len(aligned_scores) == 0 else 0.0
+            # Same rule as the reorder path: D == 0 ⇔ every entry was
+            # ignored, so the match is vacuous.
+            score = 1.0
         else:
             score = float(dp[n][m]) / D
         score = max(0.0, min(1.0, score))
@@ -222,10 +236,12 @@ class _CoreAlignMixin:
         aligned_gold = []
         aligned_pred = []
         aligned_matches = []
+        present = []
         prefix_items = schema["prefixItems"]
         for i, sub_schema in enumerate(prefix_items):
             g_present = i < len(gold)
             p_present = i < len(pred)
+            present.append(g_present or p_present)
             if g_present and p_present:
                 aligned = self._align_helper(gold[i], pred[i], sub_schema, ctx)
                 aligned_gold.append(aligned["gold"])
@@ -240,14 +256,24 @@ class _CoreAlignMixin:
                 aligned_pred.append(pred[i])
                 aligned_matches.append(MatchItem(score=0.0, gold=None, pred=pred[i]))
             else:
-                # Both sides shorter than len(prefixItems). Emit a sentinel
-                # pair so the denominator (sum of prefixWeights) stays
-                # correct; renderer skips dual-None children silently.
+                # Both sides shorter than len(prefixItems): the position is
+                # vacuous — pred cannot be blamed for a slot gold does not
+                # have either. Emit a kind="absent" sentinel so the tree
+                # keeps one child per prefix position, but exclude it from
+                # the weight normalization below (else metric(g, g) < 1).
                 aligned_gold.append(None)
                 aligned_pred.append(None)
-                aligned_matches.append(MatchItem(score=0.0, gold=None, pred=None))
+                aligned_matches.append(MatchItem(score=0.0, gold=None, pred=None, kind="absent"))
         weights = np.array(schema.get("prefixWeights", np.ones(len(aligned_matches))), dtype=np.float64)
-        weights = weights / weights.sum()
+        weights = weights * np.array(present, dtype=np.float64)
+        total = float(weights.sum())
+        if total <= 0.0:
+            # All positions absent (or the present positions carry zero
+            # weight): nothing to grade, vacuous match.
+            score = 1.0
+            node_conf = 1.0
+            return {"gold": aligned_gold, "pred": aligned_pred, "match": MatchList(score=score, children=aligned_matches, kind="prefix", confidence=node_conf)}
+        weights = weights / total
         score = float(np.sum([e.score * w for e, w in zip(aligned_matches, weights)]))
         score = max(0.0, min(1.0, score))
         if ctx.compute_confidence and aligned_matches:
@@ -380,8 +406,24 @@ class _CoreAlignMixin:
             if gk is None and pk is None:
                 raise ValueError("dict alignment produced a key pair with both sides None (None used as a dict key?)")
             if gk is not None and pk is not None:
-                aux_schema = schema["properties"][gk]
-                value_weights.append(schema["properties"][gk].get("valueWeight", 1.0))
+                properties = schema.get("properties", {})
+                if gk not in properties:
+                    # Open-world JSON Schema (additionalProperties defaults
+                    # to true) lets gold carry keys the schema never
+                    # declares. There is no schema node to score against:
+                    # soft-zero the pair and warn instead of crashing.
+                    warnings.warn(
+                        f"gold key {gk!r} is not declared in the schema's "
+                        "'properties'; scored 0.0 — declare the property or "
+                        "set additionalProperties: false",
+                        UserWarning,
+                    )
+                    aligned_value = {"gold": ag, "pred": ap, "match": MatchItem(score=0.0, gold=ag, pred=ap)}
+                    value_weights.append(1.0)
+                    aligned_values.append(aligned_value)
+                    continue
+                aux_schema = properties[gk]
+                value_weights.append(aux_schema.get("valueWeight", 1.0))
 
                 if type(ag) is not type(ap):
                     if ag is None or ap is None:
@@ -389,13 +431,12 @@ class _CoreAlignMixin:
                         # through `_align_null` and consults this property's
                         # `nullScore` (default 0.0).
                         aligned_value = self._align_helper(ag, ap, aux_schema, ctx)
-                    elif ctx.skip_validation:
-                        # Soft-zero under skip_validation: caller opted into
-                        # looser semantics, so type-mismatched values score 0
-                        # rather than raising.
-                        aligned_value = {"gold": ag, "pred": ap, "match": MatchItem(score=0.0, gold=ag, pred=ap)}
                     else:
-                        raise TypeError(f"dict value types differ for key {gk!r}: {type(ag).__name__} vs {type(ap).__name__}")
+                        # Soft-zero: a fuzzily paired or union-typed value
+                        # whose Python types differ scores 0 rather than
+                        # raising, so align() and metric() agree on
+                        # schema-valid inputs.
+                        aligned_value = {"gold": ag, "pred": ap, "match": MatchItem(score=0.0, gold=ag, pred=ap)}
                 else:
                     aligned_value = self._align_helper(ag, ap, aux_schema, ctx)
             else:

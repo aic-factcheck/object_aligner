@@ -62,7 +62,7 @@ See [`docs/concepts.md`](../concepts.md) for the architectural tour.
 
 **Raises**
 
-- **`ValueError`** — If `custom_metrics` contains an unsupported schema type, collides with a built-in metric name, `feedback_style` is not a registered style, `description_style` is not a registered style, `id_disambiguation` / `wl_integration` is not a registered value, `wl_rounds` is negative or not an int/None, or `wl_blend_lambda` is not a finite float in `[0, 1]`.
+- **`ValueError`** — If `custom_metrics` contains an unsupported schema type, collides with a built-in metric name, `feedback_style` is not a registered style, `description_style` is not a registered style, `id_disambiguation` / `wl_integration` is not a registered value, `wl_rounds` is negative or not an int/None, `wl_blend_lambda` is not a finite float in `[0, 1]`, or any array node in `schema` sets both `ignoreExcess` and `ignoreMissing` (the combination would reward omitting hard items).
 - **`jsonschema.SchemaError`** — If `schema` itself is not a valid JSON Schema.
 
 #### `ObjectAligner.align()`
@@ -89,7 +89,7 @@ Builds a per-call context, so concurrent calls on the same
 **Raises**
 
 - **`jsonschema.ValidationError`** — If validation is enabled and either input fails.
-- **`TypeError`** — If `g` and `p` are not of the same Python type.
+- **`TypeError`** — If `g` and `p` are not of the same top-level Python type. Nested dict values whose Python types differ do not raise — they score `0.0` in place, matching `metric()`.
 
 #### `ObjectAligner.metric()`
 <!-- anchor: objectalignermetric -->

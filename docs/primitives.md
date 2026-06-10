@@ -30,7 +30,7 @@ No scoring options — booleans are always compared exactly.
 
 ## Numbers (integers and floats)
 
-Numbers support two built-in scoring modes:
+Numbers support three built-in scoring modes:
 
 ### Exact match (`"exact"`)
 
@@ -56,6 +56,31 @@ print(aligner.align(50, 51))
 print(aligner.align(50, 52))
 print(aligner.align(50, 100))
 print(aligner.align(50, 50))
+```
+
+> **Calibration caveat — `invdiff` depends on the absolute scale of the field.**
+> It scores the raw difference, so `invdiff(2020, 2021) = 0.5` (adjacent years)
+> while `invdiff(1000000, 1000010) ≈ 0.09` even though the second pair is
+> relatively almost identical. Rescaling a field's unit (cents vs. euros,
+> ms vs. s) changes its scores. `invdiff` works well for small-integer domains
+> where a difference of 1 is genuinely "half wrong" (counts, days, hours);
+> for quantities with arbitrary magnitude prefer `"relative"` below.
+
+### Relative difference (`"relative"`)
+
+Returns $1 - \min\!\bigl(1, |a - b| / \max(|a|, |b|)\bigr)$, with equal values
+(including `0` vs `0`) scoring `1.0`. The score is **scale-invariant**:
+`relative(k·a, k·b) == relative(a, b)` for any `k ≠ 0`, so it is the right
+choice for measurements, prices, and other quantities whose unit is arbitrary.
+
+```python
+schema = {"type": "number", "score": "relative"}
+aligner = ObjectAligner(schema)
+
+print(aligner.align(2020, 2021))            # ≈ 0.9995
+print(aligner.align(100.0, 110.0))          # ≈ 0.909
+print(aligner.align(1_000_000, 1_000_010))  # ≈ 0.99999
+print(aligner.align(1, -1))                 # 0.0 (difference ≥ larger magnitude)
 ```
 
 ### Threshold
@@ -100,7 +125,7 @@ Integer schemas use the `integer` registry first and then fall back to the `numb
 | Keyword | Type | Default | Description |
 |---------|------|---------|-------------|
 | `type` | string | *(required)* | `"integer"` or `"number"` |
-| `score` | string | `"invdiff"` | `"exact"`, `"invdiff"`, or a registered custom metric name |
+| `score` | string | `"invdiff"` | `"exact"`, `"invdiff"`, `"relative"`, or a registered custom metric name |
 | `threshold` | float | `0.0` | Minimum score to be considered a match; scores below are set to `0.0` |
 
 ---
@@ -132,6 +157,15 @@ print(aligner.align("hello", "hallo"))
 print(aligner.align("Katherine", "Catherine"))
 print(aligner.align("hello", "world"))
 ```
+
+> **Calibration caveat — Jaro has a high floor.** Jaro-family metrics assign
+> substantial similarity to strings that are semantically unrelated:
+> `jaro("invoice_total", "customer_name") ≈ 0.53`,
+> `jaro("2024-01-15", "9999-12-31") = 0.60`. With the default
+> `threshold: 0.0`, a field whose every prediction is *wrong* can still
+> average above 0.5, compressing the useful range of the score. When a
+> "completely wrong" string should score near 0, set a `threshold`
+> (e.g. `0.5`–`0.7`) or use `"exact"` for closed vocabularies.
 
 ### Other built-in string metrics
 

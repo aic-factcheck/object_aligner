@@ -51,6 +51,45 @@ def test_number_invdiff_mode(gold, pred, expected):
     assert aligner.align(gold, pred).score == pytest.approx(expected)
 
 
+@pytest.mark.parametrize(
+    ("gold", "pred", "expected"),
+    [
+        (50, 50, 1.0),
+        (0, 0, 1.0),          # equal values short-circuit before the division
+        (0.0, 0.0, 1.0),
+        (2020, 2021, 1.0 - 1 / 2021),
+        (100, 110, 1.0 - 10 / 110),
+        (1, -1, 0.0),         # |a-b| >= max magnitude clamps to 0
+        (0, 5, 0.0),
+        (-50, -55, 1.0 - 5 / 55),
+        (1.0, 1.5, 1.0 - 0.5 / 1.5),
+    ],
+)
+def test_number_relative_mode(gold, pred, expected):
+    aligner = ObjectAligner({"type": "number", "score": "relative"})
+    assert aligner.align(gold, pred).score == pytest.approx(expected)
+
+
+def test_number_relative_is_scale_invariant():
+    aligner = ObjectAligner({"type": "number", "score": "relative"})
+    base = aligner.align(100.0, 110.0).score
+    assert aligner.align(100_000.0, 110_000.0).score == pytest.approx(base)
+    assert aligner.align(0.001, 0.0011).score == pytest.approx(base)
+
+
+def test_integer_relative_mode_supported():
+    aligner = ObjectAligner({"type": "integer", "score": "relative"})
+    assert aligner.align(1_000_000, 1_000_010).score == pytest.approx(1.0 - 10 / 1_000_010)
+
+
+def test_custom_number_metric_named_relative_collides_with_builtin():
+    with pytest.raises(ValueError, match="collide with built-in metrics"):
+        ObjectAligner(
+            {"type": "number", "score": "relative"},
+            custom_metrics={"number": {"relative": lambda g, p: 1.0}},
+        )
+
+
 def test_number_threshold_applies_after_scoring():
     invdiff = ObjectAligner({"type": "integer", "score": "invdiff", "threshold": 0.5})
     exact = ObjectAligner({"type": "integer", "score": "exact", "threshold": 0.5})

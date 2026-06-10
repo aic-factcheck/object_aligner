@@ -153,31 +153,54 @@ def test_ignore_excess_and_ignore_missing_change_list_normalization():
             "ignoreMissing": True,
         },
     )
-    ignore_both = ObjectAligner({
-            "type": "array",
-            "items": {"type": "string", "score": "exact"},
-            "order": "align",
-            "ignoreExcess": True,
-            "ignoreMissing": True,
-        },
-    )
-
     assert ignore_excess.align(["a"], ["a", "b"]).score == 1.0
     assert ignore_missing.align(["a", "b"], ["a"]).score == 1.0
-    assert ignore_both.align(["a"], ["a", "b"]).score == 1.0
 
 
-def test_ignore_excess_and_ignore_missing_with_total_mismatch_is_known_issue():
-    aligner = ObjectAligner({
+def test_ignore_excess_and_ignore_missing_together_raise_at_construction():
+    # The combination would score the mean over matched pairs only, which
+    # rewards omitting hard items (a strictly closer prediction could score
+    # lower); it is rejected at construction.
+    with pytest.raises(ValueError, match="ignoreExcess.*ignoreMissing"):
+        ObjectAligner({
             "type": "array",
             "items": {"type": "string", "score": "exact"},
             "order": "align",
             "ignoreExcess": True,
             "ignoreMissing": True,
-        },
-    )
+        })
 
-    assert aligner.align(["a"], ["b"]).score == 0.0
+
+@pytest.mark.parametrize("order", ["align", "fixed"])
+def test_ignore_flags_honored_when_one_side_is_empty(order):
+    ignore_excess = ObjectAligner({
+        "type": "array",
+        "items": {"type": "string", "score": "exact"},
+        "order": order,
+        "ignoreExcess": True,
+    })
+    ignore_missing = ObjectAligner({
+        "type": "array",
+        "items": {"type": "string", "score": "exact"},
+        "order": order,
+        "ignoreMissing": True,
+    })
+    plain = ObjectAligner({
+        "type": "array",
+        "items": {"type": "string", "score": "exact"},
+        "order": order,
+    })
+
+    # Excess pred items are ignored even when gold is empty (and vice versa
+    # for missing) — same rule as the non-empty case.
+    assert ignore_excess.align([], ["junk"]).score == 1.0
+    assert ignore_missing.align(["a"], []).score == 1.0
+    # The opposite flag does not excuse the opposite side.
+    assert ignore_excess.align(["a"], []).score == 0.0
+    assert ignore_missing.align([], ["junk"]).score == 0.0
+    # Without flags the empty-side cases still score 0.
+    assert plain.align([], ["junk"]).score == 0.0
+    assert plain.align(["a"], []).score == 0.0
 
 
 @pytest.mark.parametrize(
@@ -255,7 +278,7 @@ def test_prefix_items_pads_when_pred_shorter_than_schema():
     assert match.score == pytest.approx(0.5)
 
 
-def test_prefix_items_pads_when_both_shorter_than_schema():
+def test_prefix_items_both_shorter_positions_are_vacuous():
     aligner = ObjectAligner({
         "type": "array",
         "prefixItems": [
@@ -267,11 +290,31 @@ def test_prefix_items_pads_when_both_shorter_than_schema():
     })
     match = aligner.align(["car"], ["car"], skip_validation=True)
     assert len(match.children) == 3
-    # Position 0: exact match. Positions 1+2: both sides missing (sentinel).
+    # Position 0: exact match. Positions 1+2: absent from both sides —
+    # kind="absent" sentinels excluded from the weight normalization, so a
+    # pred identical to gold scores a full 1.0 (identity holds).
     assert match.children[0].score == 1.0
     assert match.children[1].gold is None and match.children[1].pred is None
-    assert match.children[2].gold is None and match.children[2].pred is None
-    assert match.score == pytest.approx(1 / 3)
+    assert match.children[1].kind == "absent"
+    assert match.children[2].kind == "absent"
+    assert match.score == pytest.approx(1.0)
+
+
+def test_prefix_items_identity_holds_for_short_and_empty_lists():
+    aligner = ObjectAligner({
+        "type": "array",
+        "prefixItems": [
+            {"type": "string", "score": "exact"},
+            {"type": "integer", "score": "exact"},
+            {"type": "string", "score": "exact"},
+        ],
+    })
+    assert aligner.metric(["car", 5], ["car", 5])["score"] == 1.0
+    assert aligner.metric(["car"], ["car"])["score"] == 1.0
+    assert aligner.metric([], [])["score"] == 1.0
+    # Asymmetric absence is still a deficit: gold has position 1, pred not.
+    # Only the two present positions are weighted (the third is vacuous).
+    assert aligner.metric(["car", 5], ["car"])["score"] == pytest.approx(0.5)
 
 
 def test_prefix_weights_sum_zero_raises_at_construction():

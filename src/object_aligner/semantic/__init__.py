@@ -3,8 +3,7 @@
 A three-layer stack — embedder, cache, metric — composed by dependency
 injection and plugged into ``ObjectAligner`` via the standard
 ``custom_metrics`` mechanism. See :doc:`docs/semantic.md` for the full
-chapter; the design discussion lives in
-``research/opus47_semantic_search.md``.
+chapter.
 
 Public surface (none of these are re-exported at the top-level
 ``object_aligner`` namespace — semantic is an opt-in feature):

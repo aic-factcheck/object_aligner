@@ -350,6 +350,12 @@ def _walk_list(
         child_schema = _resolve_list_child_schema(node, schema, i)
         c_child = c_parent * alpha
         if alpha == 0.0:
+            if isinstance(child, MatchItem) and child.kind == "absent":
+                # Both-absent prefix sentinel: zero weight by construction,
+                # but still emitted (contribution 0) so that
+                # include_empty_positions=True can surface the position.
+                _walk_item(child, child_path, 0.0, emit_leaf, include_empty_positions)
+                continue
             # Ignored child — skip recursion entirely (it doesn't contribute
             # to the parent score, so it shouldn't show up in attribution).
             continue
@@ -493,7 +499,7 @@ def _list_alphas_uniform(children, schema) -> list[float]:
 
 
 def _list_alphas_prefix(children, schema) -> list[float]:
-    """Normalized prefixWeights schedule."""
+    """Normalized prefixWeights schedule (both-absent sentinels weigh 0)."""
     n = len(children)
     raw = schema.get("prefixWeights", None)
     if raw is None:
@@ -505,6 +511,11 @@ def _list_alphas_prefix(children, schema) -> list[float]:
         weights = [float(w) for w in raw[:n]]
         while len(weights) < n:
             weights.append(1.0)
+    # Mirror the aligner: positions absent from both sides are excluded from
+    # the normalization (they are vacuous, not deficits).
+    for i, child in enumerate(children):
+        if isinstance(child, MatchItem) and child.kind == "absent":
+            weights[i] = 0.0
     total = sum(weights)
     if total <= 0.0:
         return [0.0] * n

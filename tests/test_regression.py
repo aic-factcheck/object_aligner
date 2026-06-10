@@ -128,7 +128,6 @@ def test_nesting_documented_examples():
                                     "items": {"type": "string", "score": "jaro"},
                                     "order": "align",
                                     "ignoreExcess": True,
-                                    "ignoreMissing": True,
                                     "valueWeight": 1.0,
                                 },
                             },

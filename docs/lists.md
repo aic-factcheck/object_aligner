@@ -127,12 +127,15 @@ schema = {
     "type": "array",
     "items": {"type": "string", "score": "jaro"},
     "order": "align",
-    "ignoreExcess": True,
-    "ignoreMissing": True
+    "ignoreExcess": True
 }
 ```
 
 Use `ignoreExcess` when you want to be lenient about over-prediction (e.g., the model found extra entities that aren't wrong, just not in the gold standard). Use `ignoreMissing` when partial extraction is acceptable.
+
+The two flags are **mutually exclusive**: setting both on the same array raises `ValueError` at construction. With both flags the score would be the mean over successfully paired items only, which rewards omitting hard items — a strictly closer prediction could score lower than one that simply leaves items out.
+
+The flags also cover the degenerate empty-side cases: with `ignoreExcess: true`, `gold=[]` vs `pred=["junk"]` scores `1.0` (every pred item is excess, all ignored), and symmetrically `ignoreMissing: true` makes `gold=["a"]` vs `pred=[]` score `1.0`.
 
 ---
 
@@ -166,6 +169,8 @@ print(result["description"])
 
 The prefix `[mode, count]` is compared positionally with weighted averaging. The tail `[destinations...]` is compared using whatever `"order"` is specified (default: `"fixed"`).
 
+A prefix position present on only one side scores `0.0` at its full weight. A position absent from **both** sides is *vacuous*: it is excluded from the weight normalization entirely (the match tree still carries a sentinel child with `kind="absent"` for it), so a prediction identical to the gold always scores `1.0` even when both are shorter than `prefixItems`.
+
 ---
 
 ## Combining prefixItems + items
@@ -196,8 +201,6 @@ schema = {
         "prefixImportance": 2.0,      # prefix is twice as important
         "restImportance": 1.0,
     },
-    "ignoreExcess": True,
-    "ignoreMissing": True
 }
 aligner = ObjectAligner(schema, generate_description=True)
 result = aligner.metric(gold, pred)
@@ -219,8 +222,7 @@ The number of items used for score normalization (the denominator) depends on `i
 | `ignoreExcess: true` | Exclude rows where gold is `None` |
 | `ignoreMissing: true` | Exclude rows where pred is `None` |
 
-This means `ignoreExcess` + `ignoreMissing` = normalize only over successfully paired items.
-If both flags are `true` and no items can be paired at all, the score is `0.0` for non-empty mismatched lists; only `[]` vs `[]` scores `1.0`.
+Setting both flags on the same array raises `ValueError` at construction (see above). When the denominator ends up `0` — every row was excluded by the active flag, or both lists are empty — the match is vacuous and scores `1.0`.
 
 ---
 
@@ -233,10 +235,18 @@ If both flags are `true` and no items can be paired at all, the score is `0.0` f
 | `prefixItems` | list | — | Per-position schemas for the fixed prefix |
 | `prefixWeights` | list | all 1s | Weights for each prefix position |
 | `order` | string | `"fixed"` | `"fixed"` (DP) or `"align"` (Hungarian) |
-| `ignoreExcess` | bool | `false` | Don't penalize extra predicted items |
-| `ignoreMissing` | bool | `false` | Don't penalize missing gold items |
+| `ignoreExcess` | bool | `false` | Don't penalize extra predicted items (mutually exclusive with `ignoreMissing`) |
+| `ignoreMissing` | bool | `false` | Don't penalize missing gold items (mutually exclusive with `ignoreExcess`) |
 | `prefixImportance` | float | — | Weight for prefix score (required if both `prefixItems` and `items` present) |
 | `restImportance` | float | — | Weight for tail score (required if both `prefixItems` and `items` present) |
+
+---
+
+## Caveats
+
+- **Items beyond `prefixItems` are silently unscored when no `items` schema is present.** A schema with only `prefixItems` slices both lists to the prefix length: gold or pred content past the prefix never enters the score (extra predicted junk there is free). Declare an `items` schema if the tail should be graded.
+- **Prefix positions ignore `ignoreExcess` / `ignoreMissing`.** Those flags only affect the `items` part; a one-sided prefix position always costs its full weight.
+- **Both-absent prefix positions are vacuous.** They carry zero weight (so identity holds) and appear in the match tree as `kind="absent"` sentinel children.
 
 ---
 

@@ -91,6 +91,7 @@ Supported string `score` values:
 Supported number/integer `score` values:
 - `exact`
 - `invdiff` *(default)*
+- `relative` — scale-invariant `1 - min(1, |a-b| / max(|a|, |b|))`, equal values (incl. `0` vs `0`) score `1.0`
 
 ### Custom primitive metrics
 
@@ -205,11 +206,13 @@ uv run pytest
 - All core implementation lives in a single module: `src/object_aligner/object_aligner.py`
 - `__init__.py` re-exports `ObjectAligner` from the submodule
 - The notebook `playground_object_aligner.ipynb` is from an older version and is messy — use only for inspiration
-- Dict key matching ignores value types — a `ValueError` is raised if aligned gold/pred values have different Python types
+- Dict key matching ignores value types — aligned gold/pred values with different Python types score `0.0` in place (soft-zero; consistent across `align()` and `metric()`). A gold key not declared in the schema's `properties` also soft-zeros (weight `1.0`) and emits a `UserWarning` instead of crashing; recommend `additionalProperties: false` for closed-world scoring
+- `ignoreExcess` and `ignoreMissing` are mutually exclusive on the same array node — both set raises `ValueError` at construction (`_validate_ignore_flags` in `_aligner_schema.py`; the combination would reward omitting hard items). When the normalization denominator `D` is `0` (every unmatched entry ignored, or both lists empty), the list scores a vacuous `1.0` — including the fixed-list `n==0`/`m==0` early returns under the matching flag
+- `prefixItems` positions absent from both sides are vacuous: excluded from the prefix-weight normalization (identity `metric(g, g) == 1` holds for lists shorter than `prefixItems`) and emitted as `kind="absent"` sentinel children; attribution gives them alpha `0` (emitted with zero weight only under `include_empty_positions=True`)
 - Booleans must be checked before numbers in the dispatcher because `isinstance(True, int)` is `True` in Python
 - Unsupported primitive metric names should raise clear `ValueError`s rather than relying on `assert`
 - Custom metric registry validation happens at construction time
-- `MatchItem.kind` is `"id"` for `idScope` fields, `"ref"` for `ref` fields, `"null"` when one or both of gold/pred is `None`, and `""` (default) otherwise; the debug tree surfaces this as a `"marker"` field when non-empty. The null-aware leaf is produced by `_align_null`, called from `_align_helper` after the `idScope`/`ref` short-circuits but before the type dispatch. `nullScore` (default `0.0`) is consulted only for the asymmetric case; both-`None` always scores `1.0`. The construction-time `_validate_null_scores` walker rejects out-of-range or non-real values via `_iter_schema_children`. Repair emits a corresponding `RepairOp(kind="null_value_replace")`; the dedicated feedback template key is `feedback.op.null_value_replace`; describe emits `describe.null.match` / `describe.null.mismatch`.
+- `MatchItem.kind` is `"id"` for `idScope` fields, `"ref"` for `ref` fields, `"null"` when one or both of gold/pred is `None`, `"absent"` for prefix positions missing from both sides, and `""` (default) otherwise; the debug tree surfaces this as a `"marker"` field when non-empty. The null-aware leaf is produced by `_align_null`, called from `_align_helper` after the `idScope`/`ref` short-circuits but before the type dispatch. `nullScore` (default `0.0`) is consulted only for the asymmetric case; both-`None` always scores `1.0`. The construction-time `_validate_null_scores` walker rejects out-of-range or non-real values via `_iter_schema_children`. Repair emits a corresponding `RepairOp(kind="null_value_replace")`; the dedicated feedback template key is `feedback.op.null_value_replace`; describe emits `describe.null.match` / `describe.null.mismatch`.
 - `_align_helper` short-circuits on `idScope` (always scores 1.0) and `ref` (scores via the bijection) **before** the type dispatch, so the order in that method matters — see the comment at the top of the method.
 - Per-call referential state (`current_mappings`, `pred_ids`, `gold_ids`, `pred_excess_ids`, `mask_scope`, `mask_all_refs`, `skip_validation`) lives in an `_AlignContext` dataclass that `align()` creates per call and threads through `_align_helper` and the recursive `_align_*` methods; concurrent `align()` / `metric()` calls on the same instance are safe.
 - The JSON Schema validator is built once at construction (`self._validator = validator_for(schema)(schema)`) and reused across `align()` / `metric()` calls.

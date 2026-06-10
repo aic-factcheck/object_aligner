@@ -737,7 +737,7 @@ def _walk_dict(
         # Gain-weighted blend of key-pair and value-subtree confidences.
         # When total_gain is zero, both halves are perfect; rename_conf
         # defaults to 1.0 (the rename has nothing to fix and is fully
-        # committed). See research/opus47_confidence_analysis.md §4.2.4.
+        # committed).
         total_gain = key_gain + value_gain
         if total_gain > 0:
             value_conf_avg = (

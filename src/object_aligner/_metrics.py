@@ -34,6 +34,19 @@ def similarity_num_inv_diff(a, b):
     return score
 
 
+def similarity_num_relative(a, b):
+    """Scale-invariant similarity: ``1 - min(1, |a-b| / max(|a|, |b|))``.
+
+    Equal values (including ``0`` vs ``0``) score ``1.0``; values whose
+    difference is at least as large as the larger magnitude score ``0.0``.
+    Unlike ``invdiff`` the result does not depend on the unit of the field:
+    ``relative(k*a, k*b) == relative(a, b)`` for any ``k != 0``.
+    """
+    if a == b:
+        return 1.0
+    return max(0.0, 1.0 - abs(a - b) / max(abs(a), abs(b)))
+
+
 def similarity_string_jaro(a, b):
     return Jaro.normalized_similarity(a, b)
 
@@ -75,5 +88,6 @@ BUILTIN_STRING_METRICS = {
 BUILTIN_NUMBER_METRICS = {
     "exact": similarity_exact,
     "invdiff": similarity_num_inv_diff,
+    "relative": similarity_num_relative,
 }
 SUPPORTED_CUSTOM_METRIC_TYPES = frozenset({"string", "number", "integer"})

@@ -182,21 +182,18 @@ got the *values* right and the keys are treated as scaffolding.
 
 ## Important caveat: key-value type consistency
 
-Because keys are matched *before* values, and the value schema is looked up from the **gold key**'s property definition, there's a constraint:
+Because keys are matched *before* values, and the value schema is looked up from the **gold key**'s property definition, aligned gold and predicted values are expected to share one type. When they don't — typically because fuzzy key matching paired a gold key with an unrelated predicted key, or the schema declares a union type — the pair is scored `0.0` in place:
 
-> **The types of aligned gold and predicted values must match.**
+```python
+from object_aligner import ObjectAligner
 
-If a gold key `"age"` maps to an integer 24, but the predicted key `"ages"` maps to a string `"twenty-three"`, the aligner will raise a `TypeError`:
-
+aligner = ObjectAligner({"type": "object", "properties": {"date": {"type": "string"}}})
+# jaro("date", "rate") pairs the keys, but str vs int can't be compared:
+aligner.metric({"date": "2024"}, {"rate": 5})   # {'score': 0.0} — no exception
+aligner.align({"date": "2024"}, {"rate": 5})    # same: the value pair scores 0.0
 ```
-TypeError: dict value types differ for key 'age': int vs str
-```
 
-This is by design — the schema for a property defines one type, and both the gold and predicted values under that key must conform to it.
-
-### Softer behavior under `skip_validation=True`
-
-When you call `align(gold, pred, skip_validation=True)` (or use `align` directly without validation), the type-mismatch raise is suppressed and the pair is scored as `0` instead. This lets evaluation pipelines tolerate occasional schema-non-conforming predictions without crashing. The `metric()` method validates `pred` against the schema itself and returns `{"score": 0.0}` on validation failure, so the soft-zero branch only surfaces through direct `align(..., skip_validation=True)` use.
+The soft-zero rule applies uniformly: `align()`, `metric()`, and the `skip_validation=True` variants all agree on the same inputs. The exception is `None`: when exactly one side of a pair is `None`, the pair routes through null-aware scoring and the property's `nullScore` (see [`null_handling.md`](null_handling.md)).
 
 ---
 
@@ -208,6 +205,10 @@ When the Hungarian algorithm cannot pair a gold key with any predicted key (simi
 - **Extra key**: predicted key with no gold match → value scored as 0.0
 
 These contribute negatively to both the key score and the value score.
+
+### Keys not declared in `properties`
+
+JSON Schema is open-world by default (`additionalProperties` is `true` unless you say otherwise), so a *gold* object can validate while carrying keys the schema never declares. The aligner has no schema node to score such a pair against: it scores `0.0` at weight `1.0` and emits a `UserWarning` naming the key. If your data is closed-world — and for scoring it almost always should be — declare every key in `properties` and set `"additionalProperties": false` so validation catches strays up front.
 
 ---
 
