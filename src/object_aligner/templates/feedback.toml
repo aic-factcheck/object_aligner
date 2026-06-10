@@ -60,6 +60,32 @@
 # entity. No gold-space id is surfaced.
 "feedback.op.ref_fix_no_target" = "{rank}. {path}: reference {pred} cannot be resolved against any entity in the prediction. Recovers +{score_delta:.3f}."
 
+# --- Semantic referential feedback (opt-in) ---------------------------------
+# Only used when referential_feedback="semantic" (constructor or per-call). The
+# default "literal" mode never touches these keys, so default output stays
+# byte-identical. The renderer composes a ref op line from the fragments below
+# (target / used / relation clauses), then formats one of the op skeletons. If
+# the gold endpoint has no discriminating property, OA falls back to the literal
+# "feedback.op.ref_fix" / "feedback.op.ref_fix_no_target" line for that op.
+#
+# Placeholders: key, value  — one rendered endpoint property ("concept 'go-02'").
+"feedback.refsem.prop" = "{key} {value}"
+# Placeholders: relation_label  — prefix for the edge label; trailing space is
+# intentional ("this ':ARG0' reference ..."). Empty when the edge has no label.
+"feedback.refsem.relation" = "{relation_label} "
+# Placeholders: scope, gold_props  — the gold endpoint, alignment certain.
+"feedback.refsem.target" = "the {scope} with {gold_props}"
+# Placeholders: scope, gold_props  — hedge when a property-twin shares the props.
+"feedback.refsem.target_ambiguous" = "a {scope} with {gold_props} (but several match)"
+# Placeholders: scope, pred_props  — the wrong endpoint the prediction used.
+"feedback.refsem.used" = ", not the {scope} you used ({pred_props})"
+# (no placeholders) — the predicted reference resolves to no definer.
+"feedback.refsem.used_dangling" = ", but the reference you wrote resolves to nothing in your output"
+# Placeholders: rank, path, scope, relation, target, used, score_delta, score_delta_pct
+"feedback.op.ref_fix.semantic" = "{rank}. {path}: this {relation}reference should point to {target}{used}. Fixing this recovers +{score_delta:.3f}."
+# Placeholders: rank, path, scope, relation, target, score_delta, score_delta_pct
+"feedback.op.ref_fix_no_target.semantic" = "{rank}. {path}: this {relation}reference should point to {target}, but your output has no such {scope}. Recovers +{score_delta:.3f}."
+
 # Placeholders: rank, path, score_delta, score_delta_pct
 "feedback.op.subtree_replace" = "{rank}. {path}: subtree differs. Replacing it recovers +{score_delta:.3f}."
 

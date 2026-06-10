@@ -138,6 +138,21 @@ _FEEDBACK_PLACEHOLDERS = {
     "feedback.op.ref_fix_no_target": _op_placeholders(
         "rank", "path", "pred", "score_delta", "score_delta_pct",
     ),
+    # Opt-in semantic referential feedback (referential_feedback="semantic").
+    "feedback.refsem.prop": frozenset({"key", "value"}),
+    "feedback.refsem.relation": frozenset({"relation_label"}),
+    "feedback.refsem.target": frozenset({"scope", "gold_props"}),
+    "feedback.refsem.target_ambiguous": frozenset({"scope", "gold_props"}),
+    "feedback.refsem.used": frozenset({"scope", "pred_props"}),
+    "feedback.refsem.used_dangling": frozenset(),
+    "feedback.op.ref_fix.semantic": _op_placeholders(
+        "rank", "path", "scope", "relation", "target", "used",
+        "score_delta", "score_delta_pct",
+    ),
+    "feedback.op.ref_fix_no_target.semantic": _op_placeholders(
+        "rank", "path", "scope", "relation", "target",
+        "score_delta", "score_delta_pct",
+    ),
     "feedback.op.subtree_replace": _op_placeholders(
         "rank", "path", "score_delta", "score_delta_pct",
     ),
@@ -464,9 +479,22 @@ def _render_entry_text(
     templates: dict,
     fmt: Callable[[Any], str],
     pair_paths: dict,
+    ref_mode: str = "literal",
+    ref_endpoints: dict | None = None,
 ) -> str:
     """Render the per-op feedback line. Returns ``""`` if the op's template
     is empty/whitespace (silenced)."""
+    # Opt-in semantic referential feedback: render ref ops by the gold
+    # endpoint's discriminative properties instead of opaque ids. Falls through
+    # to the literal branch below when disabled, when no descriptor is present,
+    # or when the descriptor is unusable (no discriminator).
+    if ref_mode == "semantic" and op.kind in ("ref_fix", "ref_fix_no_target") and ref_endpoints:
+        desc = ref_endpoints.get(op.path)
+        if desc is not None and desc.usable:
+            semantic = _render_ref_semantic(op, rank, desc, templates, fmt)
+            if semantic is not None:
+                return semantic
+
     template_key = f"feedback.op.{op.kind}"
     if template_key not in templates:
         raise KeyError(
@@ -543,6 +571,82 @@ def _render_entry_text(
     return template.format(**kwargs)
 
 
+def _render_ref_semantic(
+    op: RepairOp,
+    rank: int,
+    desc,
+    templates: dict,
+    fmt: Callable[[Any], str],
+) -> str | None:
+    """Render a ref op via the gold endpoint's discriminative properties.
+
+    Composes the ``target`` / ``used`` / ``relation`` clauses from their
+    fragment templates, then formats the op skeleton. Returns ``None`` if a
+    required semantic template key is absent, so the caller falls back to the
+    literal line.
+    """
+    skeleton_key = f"feedback.op.{op.kind}.semantic"
+    # Fall back to the literal line if the semantic skeleton or any fragment it
+    # composes from is absent, so the "never raises" contract holds even if a
+    # template path ever bypasses the default-seeded merge.
+    required = (
+        skeleton_key,
+        "feedback.refsem.prop",
+        "feedback.refsem.target",
+        "feedback.refsem.target_ambiguous",
+        "feedback.refsem.relation",
+        "feedback.refsem.used",
+        "feedback.refsem.used_dangling",
+    )
+    if any(k not in templates for k in required):
+        return None
+
+    def _props(pairs):
+        prop_tmpl = templates["feedback.refsem.prop"]
+        return ", ".join(
+            prop_tmpl.format(key=k, value=fmt(v)) for k, v in pairs
+        )
+
+    gold_props = _props(desc.gold_props)
+    target_key = (
+        "feedback.refsem.target"
+        if desc.endpoint_certain
+        else "feedback.refsem.target_ambiguous"
+    )
+    target = templates[target_key].format(scope=desc.scope, gold_props=gold_props)
+
+    if desc.relation_values:
+        rel_label = " / ".join(fmt(v) for v in desc.relation_values)
+        relation = templates["feedback.refsem.relation"].format(
+            relation_label=rel_label
+        )
+    else:
+        relation = ""
+
+    kwargs: dict[str, Any] = {
+        "rank": rank,
+        "path": op.path,
+        "scope": desc.scope,
+        "relation": relation,
+        "target": target,
+        "score_delta": op.score_delta,
+        "score_delta_pct": 100.0 * op.score_delta,
+        "confidence": float(op.confidence),
+        "confidence_pct": 100.0 * float(op.confidence),
+    }
+
+    if op.kind == "ref_fix":
+        if desc.pred_props is not None:
+            used = templates["feedback.refsem.used"].format(
+                scope=desc.scope, pred_props=_props(desc.pred_props)
+            )
+        else:
+            used = templates["feedback.refsem.used_dangling"]
+        kwargs["used"] = used
+
+    return templates[skeleton_key].format(**kwargs)
+
+
 # -----------------------------------------------------------------------------
 # Public entry point
 # -----------------------------------------------------------------------------
@@ -559,6 +663,8 @@ def render_feedback(
     value_formatter: Callable[[Any], str] | None = None,
     dominant_fraction_threshold: float = _DEFAULT_DOMINANT_FRACTION,
     include_diagnostics: bool = True,
+    referential_feedback: str = "literal",
+    ref_endpoints: dict | None = None,
 ) -> FeedbackResult:
     """Render a `RepairResult` as a top-K ranked feedback string.
 
@@ -591,6 +697,15 @@ def render_feedback(
             was used), render them as a trailing "Diagnostic notes"
             section. Set to `False` to suppress the section even when
             such ops are present.
+        referential_feedback: `"literal"` (default) renders `ref_fix` /
+            `ref_fix_no_target` ops by opaque ids — byte-identical to
+            earlier releases. `"semantic"` renders them by the gold
+            endpoint's discriminative properties and the relation label,
+            using `ref_endpoints`. Falls back to the literal line per-op
+            when no descriptor / discriminator is available.
+        ref_endpoints: `{op.path: descriptor}` built by
+            `ObjectAligner._build_ref_endpoint_descriptors`. Required for
+            `"semantic"` mode to have any effect; ignored otherwise.
 
     Returns:
         `FeedbackResult` whose `text` is the fully rendered top-K
@@ -667,6 +782,7 @@ def render_feedback(
                     pair_rank_lookup[op.pair_id] = this_rank
                 text = _render_entry_text(
                     op, this_rank, final_templates, fmt, pair_paths,
+                    ref_mode=referential_feedback, ref_endpoints=ref_endpoints,
                 )
 
         entries.append(FeedbackEntry(

@@ -297,6 +297,88 @@ Focus on reference errors — they account for 100% of the deficit shown.
 See [Referential Alignment](referential.md) for the underlying
 `idScope` / `ref` semantics.
 
+### Example 7.5 — Transferable referential feedback (`referential_feedback="semantic"`)
+
+The default `ref_fix` line names the prediction's own ids (`change to 'p1'`).
+That is directly actionable for *this* sample, but it is a per-sample
+renumbering — useless as a lesson a prompt optimizer could carry to the next
+input. Opt into `referential_feedback="semantic"` to describe the **gold
+endpoint the reference should connect to** by its discriminative properties and
+the relation label instead. The numeric **score is unchanged** — only the
+ref-line *text* differs.
+
+This example uses a small AMR-style graph schema (nodes carry a `concept`;
+relations carry a `label` and two `ref` endpoints):
+
+```python
+schema = {
+    "type": "object",
+    "properties": {
+        "nodes": {
+            "type": "array", "order": "align",
+            "items": {"type": "object", "properties": {
+                "id":      {"type": "string", "idScope": "node"},
+                "concept": {"type": "string", "score": "exact"},
+            }},
+        },
+        "relations": {
+            "type": "array", "order": "align",
+            "items": {"type": "object", "properties": {
+                "label":  {"type": "string", "score": "exact"},
+                "source": {"type": "string", "ref": "node"},
+                "target": {"type": "string", "ref": "node"},
+            }},
+        },
+    },
+}
+gold = {"nodes": [{"id": "g1", "concept": "confirm-01"}, {"id": "g2", "concept": "protein"}],
+        "relations": [{"label": ":ARG0", "source": "g1", "target": "g2"}]}
+pred = {"nodes": [{"id": "p1", "concept": "confirm-01"}, {"id": "p2", "concept": "protein"}],
+        "relations": [{"label": ":ARG0", "source": "p2", "target": "p2"}]}
+
+aligner = ObjectAligner(schema, referential_feedback="semantic")
+print(aligner.feedback(gold, pred).text)
+```
+
+```
+The prediction scored 0.83 (deficit 0.17). Top 1 of 1 fix locations:
+1. /relations/0/source: this ':ARG0' reference should point to the node with concept 'confirm-01', not the node you used (concept 'protein'). Fixing this recovers +0.167.
+Focus on reference errors — they account for 100% of the deficit shown.
+```
+
+Compare the default (`referential_feedback="literal"`) line for the same inputs:
+
+```
+1. /relations/0/source: wrong reference (got 'p2', change to 'p1'). Fixing this recovers +0.167.
+```
+
+The mode is also available as a constructor default
+(`ObjectAligner(schema, referential_feedback="semantic")`, used by
+`metric(generate_feedback=True)`) and as a per-call override
+(`aligner.feedback(gold, pred, referential_feedback="semantic")`).
+
+Behaviour notes:
+
+- **Score-only-text.** `metric()`, `attribute()`, `repair()`, and every numeric
+  output are identical in both modes.
+- **No-op without references.** On a schema with no `ref` / `idScope` there are
+  no ref ops to enrich, so the output equals the literal mode — safe to enable
+  unconditionally.
+- **Missing endpoint.** When the gold endpoint has no counterpart in the
+  prediction (a `ref_fix_no_target` op), the line reads "… should point to a
+  node with concept 'confirm-01', but your output has no such node."
+- **Honest fallback.** If the gold endpoint has no discriminating property, or a
+  property-twin makes it ambiguous, the line either hedges
+  ("a node with concept 'thing' (but several match)") or falls back to the
+  literal rendering for that op — it never invents a misleading description and
+  never raises.
+
+The discriminative properties are the definer's direct-child scalar fields
+(excluding the id and any `ref` fields) — the same fields the referential cost
+matrix already compares. The relation label is read from the **prediction's**
+edge object. Wording is fully customizable via the `feedback.refsem.*` and
+`feedback.op.*.semantic` template keys (see [API reference](#api-reference)).
+
 ### Example 8 — Style presets: `gepa` vs `compact` vs `json`
 
 Reuses `aligner`, `gold`, `pred` from the [shared setup](#shared-setup-for-the-examples).
@@ -577,7 +659,9 @@ natural home there.
 
 ### Template keys
 
-The full table of 18 template keys and their placeholders.
+The table of the most commonly customized template keys and their
+placeholders (the opt-in `referential_feedback="semantic"` keys are listed
+separately below).
 
 | Key | Fires when | Placeholders |
 |---|---|---|
@@ -593,12 +677,31 @@ The full table of 18 template keys and their placeholders.
 | `feedback.op.list_item_remove` | fixed-list excess item | `rank`, `path`, `pred`, `score_delta`, `score_delta_pct` |
 | `feedback.op.list_item_missing` | reorder-list missing item | `rank`, `list_path`, `gold`, `score_delta`, `score_delta_pct` |
 | `feedback.op.list_item_excess` | reorder-list excess item | `rank`, `list_path`, `pred`, `score_delta`, `score_delta_pct` |
-| `feedback.op.ref_fix` | wrong reference | `rank`, `path`, `gold`, `pred`, `score_delta`, `score_delta_pct` |
+| `feedback.op.ref_fix` | wrong reference (literal mode) | `rank`, `path`, `pred`, `value`, `score_delta`, `score_delta_pct` |
+| `feedback.op.ref_fix_no_target` | gold referent missing from pred (literal mode) | `rank`, `path`, `pred`, `score_delta`, `score_delta_pct` |
 | `feedback.op.subtree_replace` | `granularity != "leaf"` and subtree imperfect | `rank`, `path`, `score_delta`, `score_delta_pct` |
 | `feedback.synthesis.single_dominant` | one op-kind ≥ `dominant_fraction_threshold` of displayed deficit | `dominant_kind`, `dominant_kind_human`, `dominant_fraction`, `dominant_fraction_pct` |
 | `feedback.synthesis.mixed` | otherwise (and synthesis enabled) | `top_kinds` |
 | `feedback.empty` | `top_k` filter empties everything | `score`, `score_pct` |
 | `feedback.validation_error` | pred fails schema validation | `path`, `message` |
+
+#### Semantic referential-feedback keys
+
+Used only when `referential_feedback="semantic"` (see
+[Example 7.5](#example-75-transferable-referential-feedback-referential_feedbacksemantic)).
+The renderer composes the `target` / `used` / `relation` clauses from the
+fragments, then formats one of the `.semantic` op skeletons.
+
+| Key | Role | Placeholders |
+|---|---|---|
+| `feedback.refsem.prop` | one rendered endpoint property | `key`, `value` |
+| `feedback.refsem.relation` | edge-label prefix (trailing space intentional) | `relation_label` |
+| `feedback.refsem.target` | gold endpoint, alignment certain | `scope`, `gold_props` |
+| `feedback.refsem.target_ambiguous` | gold endpoint, property-twin hedge | `scope`, `gold_props` |
+| `feedback.refsem.used` | wrong endpoint the prediction used | `scope`, `pred_props` |
+| `feedback.refsem.used_dangling` | predicted reference resolves to nothing | _(none)_ |
+| `feedback.op.ref_fix.semantic` | semantic `ref_fix` skeleton | `rank`, `path`, `scope`, `relation`, `target`, `used`, `score_delta`, `score_delta_pct` |
+| `feedback.op.ref_fix_no_target.semantic` | semantic `ref_fix_no_target` skeleton | `rank`, `path`, `scope`, `relation`, `target`, `score_delta`, `score_delta_pct` |
 
 The default templates are exported as `DEFAULT_FEEDBACK_TEMPLATES`
 (`from object_aligner import DEFAULT_FEEDBACK_TEMPLATES`).

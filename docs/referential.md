@@ -518,10 +518,23 @@ arbitrary tie-break — construct the aligner with `id_disambiguation="none"`.
 
 ---
 
+## Transferable feedback for reference errors
+
+`aligner.feedback()` describes a mis-routed `ref` by the prediction's own ids by
+default (`change to 'p1'`). For prompt-optimizer reflection slots that is a
+per-sample renumbering, not a reusable lesson. Pass
+`referential_feedback="semantic"` (constructor or per-call) to instead describe
+the **gold endpoint the reference should connect to** by its discriminative
+properties and the relation label — e.g. _"this ':ARG0' reference should point
+to the node with concept 'confirm-01', not the node you used (concept
+'protein')."_ The score is unchanged; only the feedback text differs. See
+[Feedback — Example 7.5](feedback.md#example-75-transferable-referential-feedback-referential_feedbacksemantic).
+
 ## See also
 
 - [Schema Reference — Referential ids](schema_reference.md#referential-ids-idscope-ref)
 - [The Metric Function](metric.md) for the surrounding API and debug/description output.
+- [Feedback](feedback.md) — prompt-optimizer feedback, including the semantic referential mode.
 - [`api.md`](api.md) — generated API reference.
 
 [← Documentation home](index.md)

@@ -85,6 +85,20 @@ LEGACY_FEEDBACK = {
     "feedback.op.ref_fix_no_target":
         "{rank}. {path}: reference {pred} cannot be resolved against any "
         "entity in the prediction. Recovers +{score_delta:.3f}.",
+    "feedback.refsem.prop": "{key} {value}",
+    "feedback.refsem.relation": "{relation_label} ",
+    "feedback.refsem.target": "the {scope} with {gold_props}",
+    "feedback.refsem.target_ambiguous":
+        "a {scope} with {gold_props} (but several match)",
+    "feedback.refsem.used": ", not the {scope} you used ({pred_props})",
+    "feedback.refsem.used_dangling":
+        ", but the reference you wrote resolves to nothing in your output",
+    "feedback.op.ref_fix.semantic":
+        "{rank}. {path}: this {relation}reference should point to "
+        "{target}{used}. Fixing this recovers +{score_delta:.3f}.",
+    "feedback.op.ref_fix_no_target.semantic":
+        "{rank}. {path}: this {relation}reference should point to {target}, "
+        "but your output has no such {scope}. Recovers +{score_delta:.3f}.",
     "feedback.op.subtree_replace":
         "{rank}. {path}: subtree differs. "
         "Replacing it recovers +{score_delta:.3f}.",

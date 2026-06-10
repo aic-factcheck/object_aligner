@@ -21,7 +21,7 @@ chapters use to deep-link into this page.
 <!-- anchor: objectaligner -->
 
 ```python
-ObjectAligner(schema, *, custom_metrics=None, generate_description=False, description_templates=None, description_style='default', generate_feedback=False, feedback_templates=None, feedback_style='gepa', dominant_fraction_threshold=0.6, warn_on_ambiguous_mapping=False, compute_confidence=False, confidence_method='margin', confidence_entropy_temperature=8.0, id_disambiguation='wl', wl_integration='tie_break', wl_rounds=None, wl_blend_lambda=0.5)
+ObjectAligner(schema, *, custom_metrics=None, generate_description=False, description_templates=None, description_style='default', generate_feedback=False, feedback_templates=None, feedback_style='gepa', referential_feedback='literal', dominant_fraction_threshold=0.6, warn_on_ambiguous_mapping=False, compute_confidence=False, confidence_method='margin', confidence_entropy_temperature=8.0, id_disambiguation='wl', wl_integration='tie_break', wl_rounds=None, wl_blend_lambda=0.5)
 ```
 
 Aligns a gold object against a predicted object under a schema.
@@ -49,6 +49,7 @@ See [`docs/concepts.md`](../concepts.md) for the architectural tour.
 - **`generate_feedback`** — Default for the `generate_feedback` parameter of `metric()`. When truthy, `metric()` returns include a `"feedback"` key. Accepts `True` / `False` / `"full"`; see [`docs/feedback.md`](../feedback.md).
 - **`feedback_templates`** — Optional partial override of the packaged feedback templates. Validated against the same allowlist machinery as `description_templates`.
 - **`feedback_style`** — One of the registered feedback styles (default `"gepa"`). Controls phrasing and synthesis-line shape.
+- **`referential_feedback`** — How `feedback()` renders `ref` / `idScope` mismatches. `"literal"` (default) uses opaque ids and is byte-identical to earlier releases. `"semantic"` instead describes the gold endpoint node the reference should connect to by its discriminative properties and the relation label — a transferable lesson for prompt optimizers. Only `feedback().text` changes; scores and every other output are identical. A no-op on schemas without `ref` / `idScope`.
 - **`dominant_fraction_threshold`** — Fraction of the deficit that one op kind must own for the feedback synthesis line to switch between the "single dominant" and "mixed" phrasings. Defaults to `0.60`.
 - **`warn_on_ambiguous_mapping`** — If `True`, emit a `UserWarning` whenever the Hungarian-derived id mapping for an `idScope` is non-unique because of tied costs. Off by default.
 - **`compute_confidence`** — If `True`, populate the `confidence` field on `MatchItem` / `MatchList` / `MatchDict` from the similarity matrix used at each Hungarian site (`order: "align"` lists and dict-key matching). Default `False` keeps `confidence == 1.0` everywhere, which preserves byte-identical output for `feedback()` and `describe()` under default flags. See [`docs/confidence.md`](../confidence.md).
@@ -271,7 +272,7 @@ Render a description from an already-computed match tree.
 <!-- anchor: objectalignerfeedback -->
 
 ```python
-ObjectAligner.feedback(gold, pred, *, top_k=5, min_score_delta=0.0, style=None, include_synthesis_line=True, include_metadata=False, dominant_fraction_threshold=None, granularity='leaf', skip_validation=False, rank_by='score_delta', include_pairing_ambiguous=False, ambiguity_threshold=0.3)
+ObjectAligner.feedback(gold, pred, *, top_k=5, min_score_delta=0.0, style=None, include_synthesis_line=True, include_metadata=False, dominant_fraction_threshold=None, granularity='leaf', skip_validation=False, rank_by='score_delta', include_pairing_ambiguous=False, ambiguity_threshold=0.3, referential_feedback=None)
 ```
 
 Render prompt-optimizer feedback for `(gold, pred)`.
@@ -295,6 +296,7 @@ LLM. The output is deterministic and template-driven. See
 - **`rank_by`** — `"score_delta"` (default), `"expected_gain"`, or `"confidence"`. See [`docs/confidence.md`](../confidence.md). Default preserves byte-identical output of earlier releases.
 - **`include_pairing_ambiguous`** — If `True`, surface a "Diagnostic notes" trailing section listing Hungarian containers whose `confidence` fell below `ambiguity_threshold`. Off by default.
 - **`ambiguity_threshold`** — Confidence threshold for the diagnostic walker. Default `0.30`.
+- **`referential_feedback`** — Override the constructor `referential_feedback` (`"literal"` / `"semantic"`). `None` defers to the instance default.
 
 **Returns** — `FeedbackResult` whose `text` is suitable for pasting into a DSPy / GEPA / TextGrad reflection slot. On validation failure of `pred`, returns a degenerate result with `score=0.0` and a rendered validation-error message as `text`.
 
@@ -306,7 +308,7 @@ LLM. The output is deterministic and template-driven. See
 <!-- anchor: objectalignerfeedback_from_match -->
 
 ```python
-ObjectAligner.feedback_from_match(match_tree, gold, pred, mappings=None, *, top_k=5, min_score_delta=0.0, style=None, include_synthesis_line=True, include_metadata=False, dominant_fraction_threshold=None, granularity='leaf', rank_by='score_delta', include_pairing_ambiguous=False, ambiguity_threshold=0.3)
+ObjectAligner.feedback_from_match(match_tree, gold, pred, mappings=None, *, top_k=5, min_score_delta=0.0, style=None, include_synthesis_line=True, include_metadata=False, dominant_fraction_threshold=None, granularity='leaf', rank_by='score_delta', include_pairing_ambiguous=False, ambiguity_threshold=0.3, referential_feedback=None)
 ```
 
 Render feedback from an already-computed match tree.
@@ -327,6 +329,7 @@ Render feedback from an already-computed match tree.
 - **`rank_by`** — See `feedback()`.
 - **`include_pairing_ambiguous`** — See `feedback()`.
 - **`ambiguity_threshold`** — See `feedback()`.
+- **`referential_feedback`** — See `feedback()`.
 
 **Returns** — `FeedbackResult` — same shape as `feedback()`.
 
@@ -693,7 +696,7 @@ Default template strings live under `src/object_aligner/templates/`. Import this
 <!-- anchor: render_feedback -->
 
 ```python
-render_feedback(repair_result: 'RepairResult', *, top_k: 'int | None' = 5, min_score_delta: 'float' = 0.0, style: 'str' = 'gepa', include_synthesis_line: 'bool' = True, include_metadata: 'bool' = False, templates: 'dict | None' = None, value_formatter: 'Callable[[Any], str] | None' = None, dominant_fraction_threshold: 'float' = 0.6, include_diagnostics: 'bool' = True) -> 'FeedbackResult'
+render_feedback(repair_result: 'RepairResult', *, top_k: 'int | None' = 5, min_score_delta: 'float' = 0.0, style: 'str' = 'gepa', include_synthesis_line: 'bool' = True, include_metadata: 'bool' = False, templates: 'dict | None' = None, value_formatter: 'Callable[[Any], str] | None' = None, dominant_fraction_threshold: 'float' = 0.6, include_diagnostics: 'bool' = True, referential_feedback: 'str' = 'literal', ref_endpoints: 'dict | None' = None) -> 'FeedbackResult'
 ```
 
 Render a `RepairResult` as a top-K ranked feedback string.
@@ -713,6 +716,8 @@ examples.
 - **`value_formatter`** — `(value) -> str` callable used to format `gold` / `pred` values in templates. Default truncates `repr(value)` to 80 chars.
 - **`dominant_fraction_threshold`** — Threshold above which the single-dominant synthesis line fires. Default `0.60`.
 - **`include_diagnostics`** — If `True` (default) and the underlying `RepairResult` contains `pairing_ambiguous` ops (only emitted when `aligner.feedback(..., include_pairing_ambiguous=True)` was used), render them as a trailing "Diagnostic notes" section. Set to `False` to suppress the section even when such ops are present.
+- **`referential_feedback`** — `"literal"` (default) renders `ref_fix` / `ref_fix_no_target` ops by opaque ids — byte-identical to earlier releases. `"semantic"` renders them by the gold endpoint's discriminative properties and the relation label, using `ref_endpoints`. Falls back to the literal line per-op when no descriptor / discriminator is available.
+- **`ref_endpoints`** — `{op.path: descriptor}` built by `ObjectAligner._build_ref_endpoint_descriptors`. Required for `"semantic"` mode to have any effect; ignored otherwise.
 
 **Returns** — `FeedbackResult` whose `text` is the fully rendered top-K feedback string.
 
@@ -777,7 +782,7 @@ yields `FeedbackEntry`s in visible-rank order.
 ### `DEFAULT_FEEDBACK_TEMPLATES` (constant)
 <!-- anchor: default_feedback_templates-constant -->
 
-Type: `dict`. Dict with 22 keys.
+Type: `dict`. Dict with 30 keys.
 
 Default template strings live under `src/object_aligner/templates/`. Import this name and pass it (or an override dict) into `ObjectAligner(...)` to customize.
 

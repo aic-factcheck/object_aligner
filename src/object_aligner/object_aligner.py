@@ -45,6 +45,7 @@ from object_aligner._confidence import _hungarian_confidence, _with_confidence
 from object_aligner._aligner_schema import _SchemaMixin
 from object_aligner._aligner_referential import _ReferentialMixin
 from object_aligner._aligner_wl import _WLMixin
+from object_aligner._aligner_reffeedback import _ReferentialFeedbackMixin
 from object_aligner._aligner_core import _CoreAlignMixin
 
 # Cross-module imports are placed here -- *after* the leaf types above are bound
@@ -70,7 +71,13 @@ from object_aligner.feedback import (
 )
 
 
-class ObjectAligner(_SchemaMixin, _ReferentialMixin, _WLMixin, _CoreAlignMixin):
+class ObjectAligner(
+    _SchemaMixin,
+    _ReferentialMixin,
+    _WLMixin,
+    _ReferentialFeedbackMixin,
+    _CoreAlignMixin,
+):
     """Aligns a gold object against a predicted object under a schema.
 
     `ObjectAligner` is the entry point for every alignment operation in the
@@ -98,6 +105,7 @@ class ObjectAligner(_SchemaMixin, _ReferentialMixin, _WLMixin, _CoreAlignMixin):
         generate_feedback=False,
         feedback_templates=None,
         feedback_style="gepa",
+        referential_feedback="literal",
         dominant_fraction_threshold=0.60,
         warn_on_ambiguous_mapping=False,
         compute_confidence=False,
@@ -143,6 +151,15 @@ class ObjectAligner(_SchemaMixin, _ReferentialMixin, _WLMixin, _CoreAlignMixin):
             feedback_style: One of the registered feedback styles
                 (default `"gepa"`). Controls phrasing and synthesis-line
                 shape.
+            referential_feedback: How `feedback()` renders `ref` /
+                `idScope` mismatches. `"literal"` (default) uses opaque
+                ids and is byte-identical to earlier releases.
+                `"semantic"` instead describes the gold endpoint node the
+                reference should connect to by its discriminative
+                properties and the relation label — a transferable lesson
+                for prompt optimizers. Only `feedback().text` changes;
+                scores and every other output are identical. A no-op on
+                schemas without `ref` / `idScope`.
             dominant_fraction_threshold: Fraction of the deficit that one
                 op kind must own for the feedback synthesis line to switch
                 between the "single dominant" and "mixed" phrasings.
@@ -218,6 +235,12 @@ class ObjectAligner(_SchemaMixin, _ReferentialMixin, _WLMixin, _CoreAlignMixin):
                 f"got {feedback_style!r}"
             )
         self.feedback_style_default = feedback_style
+        if referential_feedback not in ("literal", "semantic"):
+            raise ValueError(
+                "referential_feedback must be 'literal' or 'semantic', "
+                f"got {referential_feedback!r}"
+            )
+        self.referential_feedback_default = referential_feedback
         try:
             self.dominant_fraction_threshold_default = float(
                 dominant_fraction_threshold
@@ -556,6 +579,7 @@ class ObjectAligner(_SchemaMixin, _ReferentialMixin, _WLMixin, _CoreAlignMixin):
         rank_by="score_delta",
         include_pairing_ambiguous=False,
         ambiguity_threshold=0.30,
+        referential_feedback=None,
     ):
         """Render prompt-optimizer feedback for `(gold, pred)`.
 
@@ -593,6 +617,9 @@ class ObjectAligner(_SchemaMixin, _ReferentialMixin, _WLMixin, _CoreAlignMixin):
                 Off by default.
             ambiguity_threshold: Confidence threshold for the diagnostic
                 walker. Default `0.30`.
+            referential_feedback: Override the constructor
+                `referential_feedback` (`"literal"` / `"semantic"`).
+                `None` defers to the instance default.
 
         Returns:
             `FeedbackResult` whose `text` is suitable for pasting into a
@@ -631,6 +658,16 @@ class ObjectAligner(_SchemaMixin, _ReferentialMixin, _WLMixin, _CoreAlignMixin):
             include_pairing_ambiguous=include_pairing_ambiguous,
             ambiguity_threshold=ambiguity_threshold,
         )
+        ref_mode = (
+            self.referential_feedback_default
+            if referential_feedback is None
+            else referential_feedback
+        )
+        ref_endpoints = None
+        if ref_mode == "semantic" and self._id_scopes:
+            ref_endpoints = self._build_ref_endpoint_descriptors(
+                gold, pred, repair_result.ops
+            )
         return render_feedback(
             repair_result,
             top_k=top_k,
@@ -644,6 +681,8 @@ class ObjectAligner(_SchemaMixin, _ReferentialMixin, _WLMixin, _CoreAlignMixin):
                 if dominant_fraction_threshold is None
                 else dominant_fraction_threshold
             ),
+            referential_feedback=ref_mode,
+            ref_endpoints=ref_endpoints,
         )
 
     def feedback_from_match(
@@ -663,6 +702,7 @@ class ObjectAligner(_SchemaMixin, _ReferentialMixin, _WLMixin, _CoreAlignMixin):
         rank_by="score_delta",
         include_pairing_ambiguous=False,
         ambiguity_threshold=0.30,
+        referential_feedback=None,
     ):
         """Render feedback from an already-computed match tree.
 
@@ -682,6 +722,7 @@ class ObjectAligner(_SchemaMixin, _ReferentialMixin, _WLMixin, _CoreAlignMixin):
             rank_by: See `feedback()`.
             include_pairing_ambiguous: See `feedback()`.
             ambiguity_threshold: See `feedback()`.
+            referential_feedback: See `feedback()`.
 
         Returns:
             `FeedbackResult` — same shape as `feedback()`.
@@ -693,6 +734,16 @@ class ObjectAligner(_SchemaMixin, _ReferentialMixin, _WLMixin, _CoreAlignMixin):
             include_pairing_ambiguous=include_pairing_ambiguous,
             ambiguity_threshold=ambiguity_threshold,
         )
+        ref_mode = (
+            self.referential_feedback_default
+            if referential_feedback is None
+            else referential_feedback
+        )
+        ref_endpoints = None
+        if ref_mode == "semantic" and self._id_scopes:
+            ref_endpoints = self._build_ref_endpoint_descriptors(
+                gold, pred, repair_result.ops
+            )
         return render_feedback(
             repair_result,
             top_k=top_k,
@@ -706,6 +757,8 @@ class ObjectAligner(_SchemaMixin, _ReferentialMixin, _WLMixin, _CoreAlignMixin):
                 if dominant_fraction_threshold is None
                 else dominant_fraction_threshold
             ),
+            referential_feedback=ref_mode,
+            ref_endpoints=ref_endpoints,
         )
 
     def describe(

@@ -1032,12 +1032,13 @@ def test_to_dict_round_trips_basic_types():
     assert d["text"] == fb.text
 
 
-def test_default_feedback_templates_has_22_keys():
+def test_default_feedback_templates_has_30_keys():
     # 19 op/intro/synthesis/empty/validation keys + 2 confidence keys
     # (feedback.op.pairing_ambiguous and feedback.diagnostics.intro)
     # added in the confidence (cluster 4) release + 1 ref_fix_no_target
-    # added in the pred-space-ref-feedback change.
-    assert len(DEFAULT_FEEDBACK_TEMPLATES) == 22
+    # added in the pred-space-ref-feedback change + 8 semantic referential
+    # feedback keys (6 refsem fragments + 2 .semantic op skeletons).
+    assert len(DEFAULT_FEEDBACK_TEMPLATES) == 30
 
 
 def test_feedback_invalid_pred_renders_validation_error_text():
@@ -1068,3 +1069,226 @@ def test_feedback_result_is_frozen():
                         truncated=False, n_total_ops=0)
     with pytest.raises(Exception):
         fb.score = 0.5  # type: ignore[misc]
+
+
+# -----------------------------------------------------------------------------
+# Semantic referential feedback (referential_feedback="semantic")
+# -----------------------------------------------------------------------------
+
+def _amr_schema():
+    return {
+        "type": "object",
+        "properties": {
+            "nodes": {
+                "type": "array", "order": "align",
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "id": {"type": "string", "idScope": "node"},
+                        "concept": {"type": "string", "score": "exact"},
+                    },
+                },
+            },
+            "relations": {
+                "type": "array", "order": "align",
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "label": {"type": "string", "score": "exact"},
+                        "source": {"type": "string", "ref": "node"},
+                        "target": {"type": "string", "ref": "node"},
+                    },
+                },
+            },
+        },
+    }
+
+
+def _amr_gold_pred():
+    gold = {
+        "nodes": [{"id": "g1", "concept": "confirm-01"},
+                  {"id": "g2", "concept": "protein"}],
+        "relations": [{"label": ":ARG0", "source": "g1", "target": "g2"}],
+    }
+    pred = {
+        "nodes": [{"id": "p1", "concept": "confirm-01"},
+                  {"id": "p2", "concept": "protein"}],
+        # source points at the protein node; gold says the confirm-01 node
+        "relations": [{"label": ":ARG0", "source": "p2", "target": "p2"}],
+    }
+    return gold, pred
+
+
+def test_referential_feedback_invalid_value_raises():
+    with pytest.raises(ValueError, match="referential_feedback"):
+        ObjectAligner(_amr_schema(), referential_feedback="bogus")
+
+
+def test_semantic_renders_gold_endpoint_props_and_label():
+    gold, pred = _amr_gold_pred()
+    fb = ObjectAligner(_amr_schema(), referential_feedback="semantic").feedback(
+        gold, pred
+    )
+    line = next(e.text for e in fb.entries if e.op_kind == "ref_fix")
+    assert "concept 'confirm-01'" in line          # gold endpoint property
+    assert "':ARG0'" in line                        # relation label
+    assert "concept 'protein'" in line              # wrong node it used
+    assert "should point to" in line
+    # No gold-space id leaks.
+    assert "g1" not in line and "g2" not in line
+
+
+def test_semantic_score_identical_to_literal():
+    gold, pred = _amr_gold_pred()
+    lit = ObjectAligner(_amr_schema()).feedback(gold, pred)
+    sem = ObjectAligner(_amr_schema(), referential_feedback="semantic").feedback(
+        gold, pred
+    )
+    assert lit.score == sem.score
+    # Only the ref line text differs; structured fields are unchanged.
+    assert [e.op_kind for e in lit.entries] == [e.op_kind for e in sem.entries]
+    assert [e.score_delta for e in lit.entries] == [e.score_delta for e in sem.entries]
+
+
+def test_default_is_literal_and_byte_identical():
+    gold, pred = _amr_gold_pred()
+    aligner = ObjectAligner(_amr_schema())  # default referential_feedback
+    assert (
+        aligner.feedback(gold, pred).text
+        == aligner.feedback(gold, pred, referential_feedback="literal").text
+    )
+    # The default literal line uses the opaque-id phrasing.
+    assert "wrong reference" in aligner.feedback(gold, pred).text
+
+
+def test_per_call_overrides_constructor_default():
+    gold, pred = _amr_gold_pred()
+    # Constructor literal, per-call semantic.
+    a = ObjectAligner(_amr_schema())
+    assert "should point to" in a.feedback(gold, pred, referential_feedback="semantic").text
+    # Constructor semantic, per-call literal.
+    b = ObjectAligner(_amr_schema(), referential_feedback="semantic")
+    assert "wrong reference" in b.feedback(gold, pred, referential_feedback="literal").text
+
+
+def test_semantic_multi_prop_endpoint():
+    schema = {
+        "type": "object",
+        "properties": {
+            "atoms": {
+                "type": "array", "order": "align",
+                "items": {"type": "object", "properties": {
+                    "idx": {"type": "integer", "idScope": "atom"},
+                    "element": {"type": "string", "score": "exact"},
+                    "charge": {"type": "integer"},
+                    "num_h": {"type": "integer"},
+                }},
+            },
+            "bonds": {
+                "type": "array", "order": "align",
+                "items": {"type": "object", "properties": {
+                    "order": {"type": "string", "score": "exact"},
+                    "source": {"type": "integer", "ref": "atom"},
+                    "target": {"type": "integer", "ref": "atom"},
+                }},
+            },
+        },
+    }
+    gold = {
+        "atoms": [{"idx": 1, "element": "C", "charge": 0, "num_h": 0},
+                  {"idx": 2, "element": "N", "charge": 0, "num_h": 1}],
+        "bonds": [{"order": "double", "source": 1, "target": 2}],
+    }
+    # pred is missing the carbon entirely -> no_target for source.
+    pred = {
+        "atoms": [{"idx": 9, "element": "N", "charge": 0, "num_h": 1}],
+        "bonds": [{"order": "double", "source": 9, "target": 9}],
+    }
+    fb = ObjectAligner(schema, referential_feedback="semantic").feedback(gold, pred)
+    line = next(e.text for e in fb.entries if e.op_kind == "ref_fix_no_target")
+    assert "element 'C', charge 0, num_h 0" in line
+    assert "'double'" in line
+    assert "no such atom" in line
+
+
+def test_semantic_falls_back_to_literal_when_no_discriminator():
+    """A definer whose only field is the id has no discriminating property,
+    so the semantic line falls back to the literal rendering for that op."""
+    schema = {
+        "type": "object",
+        "properties": {
+            "nodes": {
+                "type": "array", "order": "align",
+                "items": {"type": "object", "properties": {
+                    "id": {"type": "string", "idScope": "node"},
+                }},
+            },
+            "relations": {
+                "type": "array", "order": "align",
+                "items": {"type": "object", "properties": {
+                    "source": {"type": "string", "ref": "node"},
+                    "target": {"type": "string", "ref": "node"},
+                }},
+            },
+        },
+    }
+    gold = {"nodes": [{"id": "g1"}, {"id": "g2"}],
+            "relations": [{"source": "g1", "target": "g2"}]}
+    pred = {"nodes": [{"id": "p1"}, {"id": "p2"}],
+            "relations": [{"source": "p2", "target": "p1"}]}
+    lit = ObjectAligner(schema).feedback(gold, pred)
+    sem = ObjectAligner(schema, referential_feedback="semantic").feedback(gold, pred)
+    assert lit.text == sem.text
+
+
+def test_semantic_no_op_on_non_referential_schema():
+    schema = {"type": "object", "properties": {"a": {"type": "string", "score": "exact"}}}
+    lit = ObjectAligner(schema).feedback({"a": "x"}, {"a": "y"})
+    sem = ObjectAligner(schema, referential_feedback="semantic").feedback(
+        {"a": "x"}, {"a": "y"}
+    )
+    assert lit.text == sem.text
+
+
+def test_semantic_metric_honors_constructor_default():
+    gold, pred = _amr_gold_pred()
+    a = ObjectAligner(_amr_schema(), generate_feedback=True,
+                      referential_feedback="semantic")
+    out = a.metric(gold, pred)
+    assert "should point to" in out["feedback"]
+    # Score path unaffected.
+    assert out["score"] == ObjectAligner(_amr_schema()).metric(gold, pred)["score"]
+
+
+def test_semantic_endpoint_certain_flag_detects_property_twin():
+    """When the gold endpoint shares its property signature with another gold
+    definer, the descriptor flags it uncertain and the renderer hedges."""
+    aligner = ObjectAligner(_amr_schema(), referential_feedback="semantic")
+    gold = {
+        "nodes": [{"id": "g1", "concept": "thing"},
+                  {"id": "g2", "concept": "thing"},
+                  {"id": "g3", "concept": "other"}],
+        "relations": [],
+    }
+    pred = gold  # contents irrelevant; we test the descriptor helper directly
+    op_for_g1 = RepairOp(op="replace", path="/relations/0/source",
+                         score_delta=0.1, kind="ref_fix", gold="g1", pred="g3")
+    descs = aligner._build_ref_endpoint_descriptors(gold, pred, [op_for_g1])
+    d = descs["/relations/0/source"]
+    assert d.usable is True
+    assert d.endpoint_certain is False          # g1 has a twin (g2)
+    assert ("concept", "thing") in d.gold_props
+
+
+def test_semantic_never_raises_on_dangling_pred_ref():
+    gold, pred = _amr_gold_pred()
+    # Make pred reference an id that exists in neither node list.
+    pred = {
+        "nodes": [{"id": "p1", "concept": "confirm-01"},
+                  {"id": "p2", "concept": "protein"}],
+        "relations": [{"label": ":ARG0", "source": "zzz", "target": "p2"}],
+    }
+    fb = ObjectAligner(_amr_schema(), referential_feedback="semantic").feedback(
+        gold, pred, skip_validation=True
+    )
+    assert isinstance(fb.text, str)
