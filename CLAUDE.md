@@ -46,8 +46,6 @@ These rules cover how to structure new (and edit existing) chapters under `docs/
 │       └── object_aligner.py         # All core code (single module)
 ├── scripts/
 │   └── demo.py                       # Demo script
-├── notebooks/
-│   └── playground_object_aligner.ipynb  # Legacy playground notebook (messy, older version)
 ├── docs/
 │   ├── index.md                      # Documentation home
 │   ├── concepts.md                   # Core abstractions & architecture
@@ -205,7 +203,6 @@ uv run pytest
 
 - All core implementation lives in a single module: `src/object_aligner/object_aligner.py`
 - `__init__.py` re-exports `ObjectAligner` from the submodule
-- The notebook `playground_object_aligner.ipynb` is from an older version and is messy — use only for inspiration
 - Dict key matching ignores value types — aligned gold/pred values with different Python types score `0.0` in place (soft-zero; consistent across `align()` and `metric()`). A gold key not declared in the schema's `properties` also soft-zeros (weight `1.0`) and emits a `UserWarning` instead of crashing; recommend `additionalProperties: false` for closed-world scoring
 - `ignoreExcess` and `ignoreMissing` are mutually exclusive on the same array node — both set raises `ValueError` at construction (`_validate_ignore_flags` in `_aligner_schema.py`; the combination would reward omitting hard items). When the normalization denominator `D` is `0` (every unmatched entry ignored, or both lists empty), the list scores a vacuous `1.0` — including the fixed-list `n==0`/`m==0` early returns under the matching flag
 - `prefixItems` positions absent from both sides are vacuous: excluded from the prefix-weight normalization (identity `metric(g, g) == 1` holds for lists shorter than `prefixItems`) and emitted as `kind="absent"` sentinel children; attribution gives them alpha `0` (emitted with zero weight only under `include_empty_positions=True`)

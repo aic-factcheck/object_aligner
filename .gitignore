@@ -16,6 +16,9 @@ wheels/
 # research is internal-only development scratch space; never tracked.
 research/
 
+# notebooks are local scratch; kept on disk but not tracked.
+notebooks/
+
 # mkdocs build output
 site/
 
