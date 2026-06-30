@@ -42,19 +42,36 @@ These rules cover how to structure new (and edit existing) chapters under `docs/
 ├── uv.lock                           # Locked dependency versions
 ├── src/
 │   └── object_aligner/
-│       ├── __init__.py               # Re-exports ObjectAligner
-│       └── object_aligner.py         # All core code (single module)
+│       ├── __init__.py               # Public re-exports (ObjectAligner, match types, load_templates_from_toml)
+│       ├── object_aligner.py         # ObjectAligner facade: constructor + public API (align/metric/attribute/repair/feedback/describe)
+│       ├── _aligner_core.py          # _CoreAlignMixin: primitive/list/dict/null/bool alignment, dispatcher, debug serialization
+│       ├── _aligner_schema.py        # _SchemaMixin: metric registry + schema validators
+│       ├── _aligner_referential.py   # _ReferentialMixin: idScope/ref discovery, validation, bijection derivation
+│       ├── _aligner_reffeedback.py   # _ReferentialFeedbackMixin: semantic ref/idScope feedback rendering
+│       ├── _aligner_wl.py            # _WLMixin: Weisfeiler–Leman id disambiguation
+│       ├── _wl.py                    # Pure 1-WL color refinement (RefGraph, _RefEdge, wl_tokens)
+│       ├── _matchtypes.py            # MatchItem/MatchList/MatchDict, _IdScope, _AlignContext, to_python_value
+│       ├── _metrics.py               # Similarity functions, builtin metric registries, path2str, _schema_allows_type
+│       ├── _confidence.py            # _hungarian_confidence, _with_confidence
+│       ├── _templates.py             # Shared template loading/validation (internal)
+│       ├── attribution.py           # tree_walk_attribution, AttributionResult/Entry
+│       ├── repair.py                # repair(), RepairResult/RepairOp, ambiguous-pairings emitter
+│       ├── feedback.py              # feedback(), FeedbackResult/Entry, renderers
+│       ├── describe.py              # describe(), DescriptionResult/Entry, prose walk
+│       ├── templates/               # Default template strings as TOML (describe/feedback)
+│       └── semantic/                # Opt-in embedding-based string similarity (not top-level re-exported)
+│           ├── embedder.py          # Embedder protocol + OpenAIEmbedder
+│           ├── mock_embedder.py     # HashMockEmbedder / DictMockEmbedder
+│           ├── cache.py             # InMemory / SQLite embedding caches
+│           ├── metric.py            # cosine_similarity_metric
+│           └── precompute.py        # precompute() batch pre-warmer
 ├── scripts/
-│   └── demo.py                       # Demo script
-├── docs/
-│   ├── index.md                      # Documentation home
-│   ├── concepts.md                   # Core abstractions & architecture
-│   ├── primitives.md                 # String, number, boolean alignment
-│   ├── lists.md                      # Array alignment (fixed, reorder, prefix)
-│   ├── dicts.md                      # Dictionary/object alignment
-│   ├── nesting.md                    # Complex nested structure examples
-│   ├── metric.md                     # The metric() function & evaluation
-│   └── schema_reference.md           # Complete schema keyword reference
+│   ├── demo.py                       # Demo script
+│   ├── demo_semantic.py              # Semantic-similarity end-to-end demo
+│   └── gen_api_docs.py               # Generates docs/api.md from docstrings
+├── docs/                             # index, concepts, primitives, lists, dicts, nesting, metric,
+│                                     # describe, referential, schema_reference, attribution, repair,
+│                                     # feedback, null_handling, confidence, semantic, api
 ├── tests/                            # Pytest suite
 └── README.md
 ```
@@ -201,8 +218,8 @@ uv run pytest
 
 ## Important Notes
 
-- All core implementation lives in a single module: `src/object_aligner/object_aligner.py`
-- `__init__.py` re-exports `ObjectAligner` from the submodule
+- The core is split across focused modules under `src/object_aligner/` (a facade + mixins design): `object_aligner.py` assembles `ObjectAligner` from the `_aligner_*` mixins and holds the constructor + public API, while alignment, schema, referential, WL, confidence, attribution, repair, feedback, and describe logic each live in their own module (see Project Structure above)
+- `__init__.py` re-exports the public surface (`ObjectAligner`, `MatchItem`/`MatchList`/`MatchDict`, `load_templates_from_toml`)
 - Dict key matching ignores value types — aligned gold/pred values with different Python types score `0.0` in place (soft-zero; consistent across `align()` and `metric()`). A gold key not declared in the schema's `properties` also soft-zeros (weight `1.0`) and emits a `UserWarning` instead of crashing; recommend `additionalProperties: false` for closed-world scoring
 - `ignoreExcess` and `ignoreMissing` are mutually exclusive on the same array node — both set raises `ValueError` at construction (`_validate_ignore_flags` in `_aligner_schema.py`; the combination would reward omitting hard items). When the normalization denominator `D` is `0` (every unmatched entry ignored, or both lists empty), the list scores a vacuous `1.0` — including the fixed-list `n==0`/`m==0` early returns under the matching flag
 - `prefixItems` positions absent from both sides are vacuous: excluded from the prefix-weight normalization (identity `metric(g, g) == 1` holds for lists shorter than `prefixItems`) and emitted as `kind="absent"` sentinel children; attribution gives them alpha `0` (emitted with zero weight only under `include_empty_positions=True`)
@@ -214,5 +231,5 @@ uv run pytest
 - Per-call referential state (`current_mappings`, `pred_ids`, `gold_ids`, `pred_excess_ids`, `mask_scope`, `mask_all_refs`, `skip_validation`) lives in an `_AlignContext` dataclass that `align()` creates per call and threads through `_align_helper` and the recursive `_align_*` methods; concurrent `align()` / `metric()` calls on the same instance are safe.
 - The JSON Schema validator is built once at construction (`self._validator = validator_for(schema)(schema)`) and reused across `align()` / `metric()` calls.
 - Weisfeiler–Leman color refinement disambiguates property-twin / attribute-less definer cases and is the default (`id_disambiguation="wl"`); see the Referential Alignment section above. The private `research/` notes track the remaining doors (callable strategy protocol, `ref_informed`, `k_wl`, graded `w`).
-- `ObjectAligner(..., compute_confidence=True, confidence_method="margin"|"entropy", confidence_entropy_temperature=8.0)` enables per-pair stability scores at every Hungarian site, surfaced on `MatchItem/MatchList/MatchDict.confidence`, `RepairOp.confidence` (gain-weighted for key-rename pairs), `FeedbackEntry.confidence`, and `DescriptionEntry.confidence`. Consumed by `feedback(rank_by="score_delta"|"expected_gain"|"confidence", include_pairing_ambiguous=False, ambiguity_threshold=0.30)` and `describe(show_confidence=False, include_ambiguous=False, ambiguity_threshold=0.30)`. All flags default off so existing `feedback()` / `describe()` output stays byte-identical. The debug tree emits `confidence` only when the value differs from `1.0`. Helpers live in `_hungarian_confidence` + `_with_confidence` near the top of `src/object_aligner/object_aligner.py`; the ambiguous-pairings emitter is `_emit_pairing_ambiguous` in `src/object_aligner/repair.py`. Full chapter: [`docs/confidence.md`](docs/confidence.md).
+- `ObjectAligner(..., compute_confidence=True, confidence_method="margin"|"entropy", confidence_entropy_temperature=8.0)` enables per-pair stability scores at every Hungarian site, surfaced on `MatchItem/MatchList/MatchDict.confidence`, `RepairOp.confidence` (gain-weighted for key-rename pairs), `FeedbackEntry.confidence`, and `DescriptionEntry.confidence`. Consumed by `feedback(rank_by="score_delta"|"expected_gain"|"confidence", include_pairing_ambiguous=False, ambiguity_threshold=0.30)` and `describe(show_confidence=False, include_ambiguous=False, ambiguity_threshold=0.30)`. All flags default off so existing `feedback()` / `describe()` output stays byte-identical. The debug tree emits `confidence` only when the value differs from `1.0`. Helpers live in `_hungarian_confidence` + `_with_confidence` in `src/object_aligner/_confidence.py`; the ambiguous-pairings emitter is `_emit_pairing_ambiguous` in `src/object_aligner/repair.py`. Full chapter: [`docs/confidence.md`](docs/confidence.md).
 - Embedding-based semantic similarity for string fields lives in the opt-in subpackage `object_aligner.semantic` (not re-exported at the top level). Three layers, composed by injection: `Embedder` (protocol) — `HashMockEmbedder` / `DictMockEmbedder` / `OpenAIEmbedder`; `EmbeddingCache` — `InMemoryEmbeddingCache` / `SQLiteEmbeddingCache` (stdlib `sqlite3`, WAL mode); `cosine_similarity_metric(cache, sign_convention="clip"|"affine")` returning the OA-shaped `(gold, pred) -> float` callable. The callable carries `.cache` + `.kind` attributes so `precompute(aligner, *objects)` can walk the schema, find every string node whose `score` resolves to a cache-backed metric, and batch-embed the union of relevant strings in one upstream call. `OpenAIEmbedder` requires the optional `semantic-openai` extra (`pip install object-aligner[semantic-openai]` → adds `openai>=1.0`); the import succeeds always but construction raises a clean `ImportError` without the extra. Tests use the deterministic `HashMockEmbedder` (BLAKE2b → seeded RNG) — never reach `localhost:8333`. Full chapter: [`docs/semantic.md`](docs/semantic.md).
