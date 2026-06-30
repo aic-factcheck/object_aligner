@@ -3,6 +3,8 @@ name = "object-aligner"
 version = "0.2.0"
 description = "Object alignment and matching library"
 readme = "README.md"
+license = "MIT"
+license-files = ["LICENSE"]
 authors = [
     { name = "Jan Drchal", email = "drchajan@fel.cvut.cz" }
 ]
