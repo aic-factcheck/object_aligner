@@ -24,7 +24,10 @@ chapters use to deep-link into this page.
 ObjectAligner(schema, *, custom_metrics=None, generate_description=False, description_templates=None, description_style='default', generate_feedback=False, feedback_templates=None, feedback_style='gepa', referential_feedback='literal', dominant_fraction_threshold=0.6, warn_on_ambiguous_mapping=False, compute_confidence=False, confidence_method='margin', confidence_entropy_temperature=8.0, id_disambiguation='wl', wl_integration='tie_break', wl_rounds=None, wl_blend_lambda=0.5)
 ```
 
-Aligns a gold object against a predicted object under a schema.
+Aligns a gold object against a candidate object under a schema.
+
+The candidate (the predicted output) is passed as the `pred`/`p`
+argument throughout the API; "candidate" is the paper's term for it.
 
 `ObjectAligner` is the entry point for every alignment operation in the
 library: scoring (`metric`), tree extraction (`align`), per-path deficit
@@ -72,7 +75,7 @@ See [`docs/concepts.md`](../concepts.md) for the architectural tour.
 ObjectAligner.align(g, p, skip_validation=False)
 ```
 
-Align gold to pred and return the match tree.
+Align gold to candidate and return the match tree.
 
 Builds a per-call context, so concurrent calls on the same
 `ObjectAligner` instance are safe. See
@@ -81,7 +84,7 @@ Builds a per-call context, so concurrent calls on the same
 **Parameters**
 
 - **`g`** — Gold (reference) object. Must match the schema unless `skip_validation=True`.
-- **`p`** — Predicted object. Must match the schema unless `skip_validation=True`.
+- **`p`** — Candidate object (the predicted output). Must match the schema unless `skip_validation=True`.
 - **`skip_validation`** — If `True`, skip JSON Schema validation of both inputs (caller is responsible for ensuring well-formedness).
 
 **Returns** — A frozen `MatchItem`, `MatchList`, or `MatchDict` whose `.score` is in `[0, 1]`. The concrete type is selected by the schema's top-level type.
@@ -108,7 +111,7 @@ single instance.
 **Parameters**
 
 - **`gold`** — Gold (reference) object. Must pass schema validation.
-- **`pred`** — Predicted object. Validation failure here is non-fatal: a score of `0.0` is returned.
+- **`pred`** — Candidate object (the predicted output). Validation failure here is non-fatal: a score of `0.0` is returned.
 - **`debug`** — When `True`, the returned dict also contains a `"debug"` key with a structured alignment tree built out of basic Python container/scalar types.
 - **`generate_description`** — Per-call override of the constructor default. `None` defers to the instance setting. Accepts `False` / `True` (renders description as a string under `"description"`) or `"full"` (a structured dict — the same shape as `DescriptionResult.to_dict()`). Any other value raises `ValueError`. See [`docs/describe.md`](../describe.md).
 - **`generate_feedback`** — Per-call override of the constructor default. `None` uses the instance setting. Accepts `False` / `True` (renders feedback as a string under `"feedback"`) or `"full"` (a structured dict — the same shape as `FeedbackResult.to_dict()`). Any other value raises `ValueError`. See [`docs/feedback.md`](../feedback.md).
@@ -135,7 +138,7 @@ Runs `align()` internally then walks the resulting match tree. See
 **Parameters**
 
 - **`gold`** — Gold (reference) object.
-- **`pred`** — Predicted object.
+- **`pred`** — Candidate object (the predicted output).
 - **`granularity`** — `"leaf"` (default) emits one entry per leaf; other values control subtree-level rollups.
 - **`include_empty_positions`** — When `True`, list-position gaps with zero contribution are emitted as explicit entries.
 - **`skip_validation`** — If `True`, skip JSON Schema validation of `gold` and `pred`.
@@ -183,7 +186,7 @@ See [`docs/repair.md`](../repair.md) for examples.
 **Parameters**
 
 - **`gold`** — Gold (reference) object.
-- **`pred`** — Predicted object.
+- **`pred`** — Candidate object (the predicted output).
 - **`granularity`** — `"leaf"` (default) or subtree-level rollups.
 - **`min_contribution`** — Drop ops whose `score_delta` falls below this threshold.
 - **`skip_validation`** — If `True`, skip JSON Schema validation.
@@ -210,7 +213,7 @@ Generate repair ops from an already-computed match tree.
 
 - **`match_tree`** — A match tree returned by `align()`.
 - **`gold`** — Gold object (used to read source values for `add` ops).
-- **`pred`** — Predicted object (used to read source values for `remove` ops).
+- **`pred`** — Candidate object (the predicted output; used to read source values for `remove` ops).
 - **`mappings`** — The `ctx.current_mappings` dict from the align-time context, needed for `ref_fix` ops. If your schema has no `ref` fields it can be `None` or `{}`. If `match_tree` was produced by `align()` and your schema declares `ref` fields, prefer `repair()` (which captures mappings automatically).
 - **`granularity`** — See `repair()`.
 - **`min_contribution`** — See `repair()`.
@@ -236,7 +239,7 @@ LLM. The output is deterministic and template-driven. See
 **Parameters**
 
 - **`gold`** — Gold (reference) object.
-- **`pred`** — Predicted object.
+- **`pred`** — Candidate object (the predicted output).
 - **`style`** — Override the constructor `description_style`. `None` defers to the instance default.
 - **`skip_validation`** — If `True`, skip JSON Schema validation.
 - **`show_confidence`** — If `True`, append a banded confidence suffix to every per-node line whose `confidence` falls below `0.70`. Requires the owning aligner to have been constructed with `compute_confidence=True`. Default preserves byte-identical output of earlier releases. See [`docs/confidence.md`](../confidence.md).
@@ -284,7 +287,7 @@ LLM. The output is deterministic and template-driven. See
 **Parameters**
 
 - **`gold`** — Gold (reference) object.
-- **`pred`** — Predicted object.
+- **`pred`** — Candidate object (the predicted output).
 - **`top_k`** — Maximum number of feedback entries to render.
 - **`min_score_delta`** — Drop entries whose `score_delta` falls below this threshold before ranking.
 - **`style`** — Override the constructor `feedback_style`. `None` defers to the instance default.
@@ -317,7 +320,7 @@ Render feedback from an already-computed match tree.
 
 - **`match_tree`** — A match tree returned by `align()`.
 - **`gold`** — Gold object.
-- **`pred`** — Predicted object.
+- **`pred`** — Candidate object (the predicted output).
 - **`mappings`** — `ctx.current_mappings` from the align-time context. Can be `None` or `{}` if your schema has no `ref` fields.
 - **`top_k`** — See `feedback()`.
 - **`min_score_delta`** — See `feedback()`.
@@ -356,7 +359,7 @@ Also produced for `idScope` and `ref` primitives.
 |-------|------|---------|-------------|
 | `score` | `float` | *(required)* | Similarity in `[0, 1]` between `gold` and `pred`. |
 | `gold` | `Any` | *(required)* | The gold (reference) primitive value. |
-| `pred` | `Any` | *(required)* | The predicted primitive value. |
+| `pred` | `Any` | *(required)* | The candidate (predicted) primitive value. |
 | `kind` | `str` | '' | `"id"` for `idScope` fields, `"ref"` for `ref` fields, `"null"` when one or both of `gold`/`pred` is `None`, and `""` otherwise. Surfaced as `"marker"` in the debug tree when non-empty. |
 | `confidence` | `float` | 1.0 | Per-pair stability score in `[0, 1]` from the enclosing Hungarian matching (key-pair confidence for keys of a `MatchDict`, item-pair confidence for items of a `MatchList` with `kind="reorder"`). `1.0` for leaves whose parent did not run a Hungarian assignment, and `1.0` for excess/missing pairs. Populated only when the owning `ObjectAligner` was constructed with `compute_confidence=True`. |
 | `aux` | `collections.abc.Mapping[str, typing.Any] | None` | None | Optional per-leaf metadata that downstream consumers (repair, feedback, describe) read without re-computing it. Currently set only for `kind="ref"` leaves: a mapping `{"mapped_pred": <pred-space id> | None}` carrying the bijection-resolved pred-space id corresponding to `gold`. `None` for all other leaves and for ref leaves that ran in a masked context. Surfaced as `"aux"` in the debug tree when non-`None`. |
@@ -539,7 +542,7 @@ math as `tree_walk_attribution`.
 - **`match_tree`** — Match tree from `align()`.
 - **`schema`** — The schema that produced `match_tree`.
 - **`gold`** — The gold object — read to populate `RepairOp.gold` and source values for `add` ops.
-- **`pred`** — The predicted object — read to populate `RepairOp.pred` and source values for `remove` ops.
+- **`pred`** — The candidate object (the predicted output) — read to populate `RepairOp.pred` and source values for `remove` ops.
 - **`mappings`** — Per-scope `{gold_id: pred_id}` dict captured from the align-time `_AlignContext.current_mappings`. Required for emitting `ref_fix` ops; if `None`, no `ref_fix` ops are emitted and the walker falls back to using the raw gold ref value as the suggested replacement (less useful — pred uses arbitrary ids by convention).
 - **`granularity`** — `"leaf"` (default), `"subtree"`, or `"all"`.
 - **`min_contribution`** — Drop ops whose `score_delta` falls below this threshold. Atomic pairs are kept iff the carrying op passes.
@@ -574,7 +577,7 @@ semantics. See [`docs/repair.md`](../repair.md) for the full
 | `op` | `str` | *(required)* | One of `"add"` / `"remove"` / `"replace"`. |
 | `path` | `str` | *(required)* | RFC 6901 JSON Pointer locating the patch site. |
 | `score_delta` | `float` | *(required)* | Positive — how much of the deficit `1 - S` applying this op would close (approximate, v1). |
-| `kind` | `str` | *(required)* | Finer discriminator (`primitive_replace`, `key_add`, `list_item_missing`, `ref_fix`, `ref_fix_no_target`, `null_value_replace`, `pairing_ambiguous`, etc.). `ref_fix_no_target` is emitted when the gold referent has no counterpart in the prediction under the derived bijection; its `value` carries the gold-side id as a best-effort apply-time replacement (works in concert with a sibling `list_item_missing` op), but feedback / describe templates do not surface that value so no gold-space id leaks into user-visible text. |
+| `kind` | `str` | *(required)* | Finer discriminator (`primitive_replace`, `key_add`, `list_item_missing`, `ref_fix`, `ref_fix_no_target`, `null_value_replace`, `pairing_ambiguous`, etc.). `ref_fix_no_target` is emitted when the gold referent has no counterpart in the candidate under the derived bijection; its `value` carries the gold-side id as a best-effort apply-time replacement (works in concert with a sibling `list_item_missing` op), but feedback / describe templates do not surface that value so no gold-space id leaks into user-visible text. |
 | `value` | `Any` | None | For `add` / `replace` ops, the value to write. |
 | `gold` | `Any` | None | Gold value at the patch site (informational, useful for rendering feedback). |
 | `pred` | `Any` | None | Predicted value at the patch site (informational). |
@@ -655,7 +658,7 @@ differentiates ``describe`` from ``feedback``).
 | `path` | `str` | *(required)* | Indicative JSON Pointer at this node. For ``order: "align"`` lists the path stops at the list itself (children share the list path) because Hungarian-matched indices are not stable; for fixed/prefix lists the index is included. |
 | `depth` | `int` | *(required)* | 0-indexed nesting depth (matches the visual indent depth). |
 | `match_kind` | `str` | *(required)* | One of ``"item"``, ``"list"``, ``"dict"``, ``"key"``, ``"ref"``, ``"id"``, or ``"ambiguous"`` (opt-in low-confidence container marker emitted only when ``include_ambiguous=True``). |
-| `outcome` | `str` | *(required)* | One of ``"match"``, ``"mismatch"``, ``"excess"``, ``"missing"``, ``"ambiguous"``, ``"no_target"`` (the last is ref-only — emitted when the gold referent has no counterpart in the prediction under the derived bijection). |
+| `outcome` | `str` | *(required)* | One of ``"match"``, ``"mismatch"``, ``"excess"``, ``"missing"``, ``"ambiguous"``, ``"no_target"`` (the last is ref-only — emitted when the gold referent has no counterpart in the candidate under the derived bijection). |
 | `score` | `float` | *(required)* | Similarity in ``[0, 1]`` at this node. |
 | `text` | `str` | *(required)* | Rendered template body for this node. May be ``""`` for silenced templates (default ``describe.id.match`` / ``describe.id.mismatch`` are empty). |
 | `confidence` | `float` | 1.0 | Stability of the pairing that produced this node in ``[0, 1]``. Inherited from the originating Match node and always populated. ``1.0`` everywhere when ``compute_confidence=False`` on the owning ``ObjectAligner``. |

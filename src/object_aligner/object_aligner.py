@@ -79,7 +79,10 @@ class ObjectAligner(
     _ReferentialFeedbackMixin,
     _CoreAlignMixin,
 ):
-    """Aligns a gold object against a predicted object under a schema.
+    """Aligns a gold object against a candidate object under a schema.
+
+    The candidate (the predicted output) is passed as the `pred`/`p`
+    argument throughout the API; "candidate" is the paper's term for it.
 
     `ObjectAligner` is the entry point for every alignment operation in the
     library: scoring (`metric`), tree extraction (`align`), per-path deficit
@@ -314,7 +317,7 @@ class ObjectAligner(
 
 
     def align(self, g, p, skip_validation=False):
-        """Align gold to pred and return the match tree.
+        """Align gold to candidate and return the match tree.
 
         Builds a per-call context, so concurrent calls on the same
         `ObjectAligner` instance are safe. See
@@ -323,8 +326,8 @@ class ObjectAligner(
         Args:
             g: Gold (reference) object. Must match the schema unless
                 `skip_validation=True`.
-            p: Predicted object. Must match the schema unless
-                `skip_validation=True`.
+            p: Candidate object (the predicted output). Must match the schema
+                unless `skip_validation=True`.
             skip_validation: If `True`, skip JSON Schema validation of both
                 inputs (caller is responsible for ensuring well-formedness).
 
@@ -383,7 +386,7 @@ class ObjectAligner(
 
         Args:
             gold: Gold (reference) object.
-            pred: Predicted object.
+            pred: Candidate object (the predicted output).
             granularity: `"leaf"` (default) emits one entry per leaf; other
                 values control subtree-level rollups.
             include_empty_positions: When `True`, list-position gaps with
@@ -469,7 +472,7 @@ class ObjectAligner(
 
         Args:
             gold: Gold (reference) object.
-            pred: Predicted object.
+            pred: Candidate object (the predicted output).
             granularity: `"leaf"` (default) or subtree-level rollups.
             min_contribution: Drop ops whose `score_delta` falls below this
                 threshold.
@@ -540,8 +543,8 @@ class ObjectAligner(
         Args:
             match_tree: A match tree returned by `align()`.
             gold: Gold object (used to read source values for `add` ops).
-            pred: Predicted object (used to read source values for
-                `remove` ops).
+            pred: Candidate object (the predicted output; used to read source
+                values for `remove` ops).
             mappings: The `ctx.current_mappings` dict from the align-time
                 context, needed for `ref_fix` ops. If your schema has no
                 `ref` fields it can be `None` or `{}`. If `match_tree` was
@@ -596,7 +599,7 @@ class ObjectAligner(
 
         Args:
             gold: Gold (reference) object.
-            pred: Predicted object.
+            pred: Candidate object (the predicted output).
             top_k: Maximum number of feedback entries to render.
             min_score_delta: Drop entries whose `score_delta` falls below
                 this threshold before ranking.
@@ -716,7 +719,7 @@ class ObjectAligner(
         Args:
             match_tree: A match tree returned by `align()`.
             gold: Gold object.
-            pred: Predicted object.
+            pred: Candidate object (the predicted output).
             mappings: `ctx.current_mappings` from the align-time context.
                 Can be `None` or `{}` if your schema has no `ref` fields.
             top_k: See `feedback()`.
@@ -787,7 +790,7 @@ class ObjectAligner(
 
         Args:
             gold: Gold (reference) object.
-            pred: Predicted object.
+            pred: Candidate object (the predicted output).
             style: Override the constructor `description_style`. `None`
                 defers to the instance default.
             skip_validation: If `True`, skip JSON Schema validation.
@@ -881,8 +884,8 @@ class ObjectAligner(
 
         Args:
             gold: Gold (reference) object. Must pass schema validation.
-            pred: Predicted object. Validation failure here is non-fatal:
-                a score of `0.0` is returned.
+            pred: Candidate object (the predicted output). Validation failure
+                here is non-fatal: a score of `0.0` is returned.
             debug: When `True`, the returned dict also contains a
                 `"debug"` key with a structured alignment tree built out
                 of basic Python container/scalar types.

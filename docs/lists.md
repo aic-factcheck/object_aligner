@@ -2,7 +2,7 @@
 
 [Docs](index.md) › Lists & Arrays
 
-Lists are the most feature-rich type in Object Aligner. They support three alignment strategies — **prefix**, **fixed order**, and **reorder (Hungarian)** — and they can be combined.
+Lists (*sequences*, in the paper's data model) are the most feature-rich type in Object Aligner. They support three alignment strategies — **prefix**, **fixed order** (*order-sensitive*), and **reorder (Hungarian)** (*order-agnostic*) — and they can be combined.
 
 All list results are wrapped in a `MatchList`, which contains an overall `score` and a list of `children` (each being a `MatchItem`, `MatchList`, or `MatchDict`).
 
@@ -68,7 +68,7 @@ The predicted list scores 25%:
 
 ## Reorder alignment (`"order": "align"`)
 
-When list order doesn't matter (e.g., a set of extracted entities), use the Hungarian algorithm to find the **best pairing** between gold and pred items, maximizing total similarity.
+When list order doesn't matter (e.g., a set of extracted entities), use the Hungarian algorithm to find the **best pairing** between gold and candidate items, maximizing total similarity. This is the *order-agnostic* regime in the paper.
 
 ### Example: Extracting a list of skills
 
@@ -86,7 +86,7 @@ result = aligner.metric(gold, pred)
 print(f"Score: {result['score']:.2f}")
 ```
 
-Even though the order is shuffled and there are typos, the Hungarian algorithm pairs each prediction with its best-matching gold item.
+Even though the order is shuffled and there are typos, the Hungarian algorithm pairs each candidate item with its best-matching gold item.
 
 ### Extra and missing items
 
@@ -117,9 +117,9 @@ The predicted output scores overall 48%, let us align...
 
 ### ignoreExcess / ignoreMissing
 
-By default, extra predictions and missing gold items count as mismatches (scored 0). You can change this:
+By default, extra candidate items and missing gold items count as mismatches (scored 0). You can change this:
 
-- **`ignoreExcess: true`** — Extra predicted items don't penalize the score (they're simply ignored in normalization).
+- **`ignoreExcess: true`** — Extra candidate items don't penalize the score (they're simply ignored in normalization).
 - **`ignoreMissing: true`** — Missing gold items don't penalize the score.
 
 ```python
@@ -131,9 +131,9 @@ schema = {
 }
 ```
 
-Use `ignoreExcess` when you want to be lenient about over-prediction (e.g., the model found extra entities that aren't wrong, just not in the gold standard). Use `ignoreMissing` when partial extraction is acceptable.
+Use `ignoreExcess` when you want to be lenient about extra items the candidate adds (e.g., the model found extra entities that aren't wrong, just not in the gold standard). Use `ignoreMissing` when partial extraction is acceptable.
 
-The two flags are **mutually exclusive**: setting both on the same array raises `ValueError` at construction. With both flags the score would be the mean over successfully paired items only, which rewards omitting hard items — a strictly closer prediction could score lower than one that simply leaves items out.
+The two flags are **mutually exclusive**: setting both on the same array raises `ValueError` at construction. With both flags the score would be the mean over successfully paired items only, which rewards omitting hard items — a strictly closer candidate could score lower than one that simply leaves items out.
 
 The flags also cover the degenerate empty-side cases: with `ignoreExcess: true`, `gold=[]` vs `pred=["junk"]` scores `1.0` (every pred item is excess, all ignored), and symmetrically `ignoreMissing: true` makes `gold=["a"]` vs `pred=[]` score `1.0`.
 
@@ -169,7 +169,7 @@ print(result["description"])
 
 The prefix `[mode, count]` is compared positionally with weighted averaging. The tail `[destinations...]` is compared using whatever `"order"` is specified (default: `"fixed"`).
 
-A prefix position present on only one side scores `0.0` at its full weight. A position absent from **both** sides is *vacuous*: it is excluded from the weight normalization entirely (the match tree still carries a sentinel child with `kind="absent"` for it), so a prediction identical to the gold always scores `1.0` even when both are shorter than `prefixItems`.
+A prefix position present on only one side scores `0.0` at its full weight. A position absent from **both** sides is *vacuous*: it is excluded from the weight normalization entirely (the match tree still carries a sentinel child with `kind="absent"` for it), so a candidate identical to the gold always scores `1.0` even when both are shorter than `prefixItems`.
 
 ---
 
@@ -235,7 +235,7 @@ Setting both flags on the same array raises `ValueError` at construction (see ab
 | `prefixItems` | list | — | Per-position schemas for the fixed prefix |
 | `prefixWeights` | list | all 1s | Weights for each prefix position |
 | `order` | string | `"fixed"` | `"fixed"` (DP) or `"align"` (Hungarian) |
-| `ignoreExcess` | bool | `false` | Don't penalize extra predicted items (mutually exclusive with `ignoreMissing`) |
+| `ignoreExcess` | bool | `false` | Don't penalize extra candidate items (mutually exclusive with `ignoreMissing`) |
 | `ignoreMissing` | bool | `false` | Don't penalize missing gold items (mutually exclusive with `ignoreExcess`) |
 | `prefixImportance` | float | — | Weight for prefix score (required if both `prefixItems` and `items` present) |
 | `restImportance` | float | — | Weight for tail score (required if both `prefixItems` and `items` present) |
@@ -244,7 +244,7 @@ Setting both flags on the same array raises `ValueError` at construction (see ab
 
 ## Caveats
 
-- **Items beyond `prefixItems` are silently unscored when no `items` schema is present.** A schema with only `prefixItems` slices both lists to the prefix length: gold or pred content past the prefix never enters the score (extra predicted junk there is free). Declare an `items` schema if the tail should be graded.
+- **Items beyond `prefixItems` are silently unscored when no `items` schema is present.** A schema with only `prefixItems` slices both lists to the prefix length: gold or candidate content past the prefix never enters the score (extra candidate junk there is free). Declare an `items` schema if the tail should be graded.
 - **Prefix positions ignore `ignoreExcess` / `ignoreMissing`.** Those flags only affect the `items` part; a one-sided prefix position always costs its full weight.
 - **Both-absent prefix positions are vacuous.** They carry zero weight (so identity holds) and appear in the match tree as `kind="absent"` sentinel children.
 

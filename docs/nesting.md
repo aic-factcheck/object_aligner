@@ -263,7 +263,7 @@ Design highlights:
 
 - **Top-level** `order: "align"` pairs students by best overall match
 - **Subjects** also use `order: "align"` — "Mathematics" in gold pairs with "Math" in pred via Jaro
-- **Comments** use `ignoreExcess` so extra predicted comments don't kill the score
+- **Comments** use `ignoreExcess` so extra candidate comments don't kill the score
 - **Grades** use `invdiff` with high `valueWeight` — getting close to the right grade matters most
 
 ---

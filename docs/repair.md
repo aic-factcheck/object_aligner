@@ -2,7 +2,7 @@
 
 [Docs](index.md) › Scored JSON-Patch Repair
 
-`attribute()` tells you *where* a prediction is wrong and *how much* each
+`attribute()` tells you *where* a candidate is wrong and *how much* each
 location costs. **`repair()`** takes the next step: it emits a **ranked list
 of structured operations** that, if applied to `pred`, would close some
 fraction of the deficit $1 - S$.

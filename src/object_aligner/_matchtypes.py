@@ -25,7 +25,7 @@ class MatchItem:
     Attributes:
         score: Similarity in `[0, 1]` between `gold` and `pred`.
         gold: The gold (reference) primitive value.
-        pred: The predicted primitive value.
+        pred: The candidate (predicted) primitive value.
         kind: `"id"` for `idScope` fields, `"ref"` for `ref` fields,
             `"null"` when one or both of `gold`/`pred` is `None`, and
             `""` otherwise. Surfaced as `"marker"` in the debug tree when

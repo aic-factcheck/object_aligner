@@ -2,7 +2,7 @@
 
 [Docs](index.md) › Per-Property Score Attribution
 
-`metric()` and `align()` answer *how well* a prediction matches the gold. **`attribute()`** answers a different question: *where exactly is the deficit, and how big is each piece?*
+`metric()` and `align()` answer *how well* a candidate matches the gold. **`attribute()`** answers a different question: *where exactly is the deficit, and how big is each piece?*
 
 Given the same `(gold, pred)` you'd feed into `metric()`, `attribute()` returns a ranked, path-keyed decomposition of $1 - S$ — one entry per schema-relevant location, sorted by how much of the deficit lives there.
 
@@ -84,7 +84,7 @@ $$
 \;}
 $$
 
-Object Aligner exposes this directly: each `AttributionEntry` has a `weight` ($c_w$) and a `contribution` ($c_w \cdot (1 - s_w)$).
+Object Aligner exposes this directly: each `AttributionEntry` has a `weight` ($c_w$) and a `contribution` ($c_w \cdot (1 - s_w)$). This per-location contribution is the same quantity the paper writes as a repair operation's score delta, $\Delta(\mathrm{op}) = c_w\,(1 - s_w)$ (see [repair](repair.md) and [feedback](feedback.md)); $c_L$ above is the effective weight $c_w$ specialized to a leaf $L$.
 
 ---
 
@@ -537,7 +537,7 @@ Tree-walk attribution is **exact** under the assignment $\sigma^\star$ that `ali
 
 What it *cannot* see: if a perturbation flipped the Hungarian's optimal pairing on a `order: "align"` list, or re-routed a DP traceback on a `order: "fixed"` list, the alignment would change and the tree-walk weights $c_L$ would be different. Wherever a discrete optimizer (Hungarian over list items, DP traceback, dict-key Hungarian, scope bijection) sits above a leaf, tree-walk is a *first-order linearization* of what a real perturbation would do.
 
-In practice this is fine — and arguably preferable — for prompt-optimizer feedback: a single conservative direction ("fix the year extractor first") is more actionable than a fragile exact gradient. But it does mean the tree-walk number is not directly comparable to the *counterfactual* gain you'd see by actually rewriting the prediction at that path.
+In practice this is fine — and arguably preferable — for prompt-optimizer feedback: a single conservative direction ("fix the year extractor first") is more actionable than a fragile exact gradient. But it does mean the tree-walk number is not directly comparable to the *counterfactual* gain you'd see by actually rewriting the candidate at that path.
 
 ---
 

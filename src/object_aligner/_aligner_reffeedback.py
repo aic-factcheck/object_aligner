@@ -4,7 +4,7 @@ Mixed into ``ObjectAligner``. For each ``ref_fix`` / ``ref_fix_no_target``
 repair op, builds a small read-only :class:`_RefEndpointDesc` describing the
 *gold endpoint node* the reference should resolve to — by its discriminative
 direct-child scalar properties, plus the relation/edge label and the (wrong)
-predicted endpoint — so feedback can render a *transferable* lesson instead of
+candidate endpoint — so feedback can render a *transferable* lesson instead of
 an opaque id renumbering. See ``docs/feedback.md`` (semantic referential
 feedback) and ``render_feedback(referential_feedback="semantic")``.
 
@@ -38,7 +38,7 @@ class _RefEndpointDesc:
     # point to (the transferable signal).
     gold_props: tuple = ()
     # Same shape for the node actually referenced, or ``None`` when the
-    # predicted id resolves to no definer (dangling pred ref).
+    # candidate id resolves to no definer (dangling candidate ref).
     pred_props: Any = None
     # Raw values of the carrier/edge's discriminative scalars (the relation
     # label, e.g. ``":ARG0"`` / ``"double"``); empty when the edge has none.
@@ -244,7 +244,7 @@ class _ReferentialFeedbackMixin:
     # -- relation label -----------------------------------------------------
 
     def _relation_label_values(self, pred, tokens, ref_edges):
-        """Discriminative scalar values of the predicted carrier (edge).
+        """Discriminative scalar values of the candidate carrier (edge).
 
         Read from ``pred`` because the op path is pred-space; refs/ids are
         already excluded by ``_exact_scalars``. Empty when the carrier carries

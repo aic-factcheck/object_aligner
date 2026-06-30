@@ -13,6 +13,9 @@ where ``c_L`` (the *effective weight*) is the product of per-aggregator alpha
 factors along the path from the root to leaf ``L``. This module produces, for
 each leaf (and optionally each internal subtree), the tuple
 ``(path, score, weight, contribution)`` with ``contribution = c_w * (1 - s_w)``.
+This per-location ``contribution`` is exactly the paper's repair-operation score
+delta, ``Δ(op) = c_w * (1 - s_w)``; ``c_L`` is the effective weight ``c_w``
+specialized to a leaf ``L``.
 
 Counterfactual attribution is intentionally left out of v1; the API shape
 (``AttributionResult.residual``) leaves room for a future ``mode="counterfactual"``

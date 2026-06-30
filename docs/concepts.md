@@ -4,13 +4,15 @@
 
 ## The Big Picture
 
-Object Aligner compares two structured objects — a **gold** (ground truth) and a **pred** (prediction) — and returns a similarity score between 0 and 1, plus optional explanation of how they differ.
+Object Aligner compares two structured objects — a **gold** (ground truth / reference) and a **candidate** (the predicted output, passed as the `pred` argument) — and returns a similarity score between 0 and 1, plus optional explanation of how they differ. In the accompanying paper this score is written $\mathrm{score}(g, p \mid S) \in [0, 1]$, where $g$ is the gold object, $p$ the candidate, and $S$ the schema.
 
 The comparison is governed by a **schema** that tells the aligner:
 
 1. **What type** each piece of data is (string, number, boolean, array, object)
 2. **How to score** each type (exact match, fuzzy match, etc.)
-3. **How to align** collections (fixed order vs. best-match reordering)
+3. **How to align** collections (fixed order, i.e. *order-sensitive*, vs. best-match reordering, i.e. *order-agnostic*)
+
+Scoring at each internal node proceeds in two phases (paper terminology): an **alignment phase** fixes which gold child is compared against which candidate child, and a **scoring phase** aggregates the per-pair child scores over that fixed correspondence into a single number in [0, 1]. Arrays are *sequences* and objects are *maps* in the paper's data model; this guide uses the Python-native terms "list" and "dictionary".
 
 ## Core Abstractions
 

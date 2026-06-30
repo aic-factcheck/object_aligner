@@ -136,7 +136,7 @@ class DescriptionEntry:
         outcome: One of ``"match"``, ``"mismatch"``, ``"excess"``,
             ``"missing"``, ``"ambiguous"``, ``"no_target"`` (the last is
             ref-only — emitted when the gold referent has no counterpart
-            in the prediction under the derived bijection).
+            in the candidate under the derived bijection).
         score: Similarity in ``[0, 1]`` at this node.
         text: Rendered template body for this node. May be ``""`` for
             silenced templates (default ``describe.id.match`` /
@@ -339,7 +339,7 @@ def _walk(
             aligned.aux is None
             or aligned.aux.get("mapped_pred") is None
         ):
-            # The gold referent has no counterpart in the prediction under
+            # The gold referent has no counterpart in the candidate under
             # the derived bijection. Route to the dedicated template so the
             # user-facing text does not surface a gold-space id.
             outcome = "no_target"

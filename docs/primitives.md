@@ -162,7 +162,7 @@ print(aligner.align("hello", "world"))
 > substantial similarity to strings that are semantically unrelated:
 > `jaro("invoice_total", "customer_name") ≈ 0.53`,
 > `jaro("2024-01-15", "9999-12-31") = 0.60`. With the default
-> `threshold: 0.0`, a field whose every prediction is *wrong* can still
+> `threshold: 0.0`, a field whose every candidate value is *wrong* can still
 > average above 0.5, compressing the useful range of the score. When a
 > "completely wrong" string should score near 0, set a `threshold`
 > (e.g. `0.5`–`0.7`) or use `"exact"` for closed vocabularies.

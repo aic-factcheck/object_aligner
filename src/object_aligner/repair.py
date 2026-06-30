@@ -60,7 +60,7 @@ class RepairOp:
             `list_item_missing`, `ref_fix`, `ref_fix_no_target`,
             `null_value_replace`, `pairing_ambiguous`, etc.).
             `ref_fix_no_target` is emitted when the gold referent has no
-            counterpart in the prediction under the derived bijection; its
+            counterpart in the candidate under the derived bijection; its
             `value` carries the gold-side id as a best-effort apply-time
             replacement (works in concert with a sibling
             `list_item_missing` op), but feedback / describe templates do
@@ -171,8 +171,8 @@ def generate_repairs(
         schema: The schema that produced `match_tree`.
         gold: The gold object — read to populate `RepairOp.gold` and
             source values for `add` ops.
-        pred: The predicted object — read to populate `RepairOp.pred`
-            and source values for `remove` ops.
+        pred: The candidate object (the predicted output) — read to populate
+            `RepairOp.pred` and source values for `remove` ops.
         mappings: Per-scope `{gold_id: pred_id}` dict captured from the
             align-time `_AlignContext.current_mappings`. Required for
             emitting `ref_fix` ops; if `None`, no `ref_fix` ops are

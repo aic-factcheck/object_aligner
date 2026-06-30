@@ -8,7 +8,8 @@ because the alignment dispatcher had no branch for them. This chapter
 describes the **null-aware leaf**: a small dispatch path activated when
 exactly one of `gold` / `pred` is `None`, plus the per-field
 `nullScore` schema keyword that calibrates how harshly the asymmetric
-case should be penalized.
+case should be penalized. (`null` here is the paper's *empty value*,
+written $\bot$.)
 
 The rule is simple:
 
@@ -40,7 +41,7 @@ aligner.metric("Smith", "Smyth")   # primitive comparator (jaro)
 
 The JSON Schema `type` must include `"null"` (use a union like
 `["string", "null"]` or a bare `"null"`). Otherwise default schema
-validation rejects the null prediction and `metric()` returns
+validation rejects the null candidate and `metric()` returns
 `{"score": 0.0}` before alignment ever runs — which is the correct
 behavior when the schema says "this field cannot be null."
 
@@ -217,7 +218,7 @@ path="/diagnosis", kind="null_value_replace", value="flu", ...)`.
 
 - **Declare nullability in the schema.** The JSON Schema validator runs
   before alignment. If the schema says `type: "string"` and the
-  prediction is `null`, validation fails and `metric()` returns
+  candidate is `null`, validation fails and `metric()` returns
   `{"score": 0.0}` without ever consulting `nullScore`. Use union
   types such as `type: ["string", "null"]` to opt in.
 - **Range.** `nullScore` must be a real number in `[0, 1]`. Booleans

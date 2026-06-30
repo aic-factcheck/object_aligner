@@ -2,7 +2,7 @@
 
 [Docs](index.md) › Dictionaries & Objects
 
-Object Aligner matches dictionaries by **aligning keys first**, then recursively aligning the corresponding values. The key alignment uses the Hungarian algorithm to find the best pairing between gold keys and predicted keys — just like reorder alignment for lists.
+Object Aligner matches dictionaries (*maps*, in the paper's data model) by **aligning keys first**, then recursively aligning the corresponding values. The key alignment uses the Hungarian algorithm to find the best pairing between gold keys and candidate keys — just like reorder alignment for lists. As the paper puts it, keys fix the correspondence and the values then grade it: the values are not consulted when choosing which keys pair.
 
 The result is a `MatchDict` with a `score` and a `children` dict that maps **key-level** `MatchItem`s to **value-level** match objects.
 As a simple edge case, an empty dict aligned with an empty dict scores `1.0`.
@@ -40,7 +40,7 @@ With exact key matching, `"name"` pairs with `"name"`, `"age"` pairs with `"age"
 
 ### Fuzzy key matching (`"keyScore": "jaro"`) — *default*
 
-Use when predicted keys might have typos — e.g., OCR output or informal data entry.
+Use when candidate keys might have typos — e.g., OCR output or informal data entry.
 
 ```python
 gold = {"weight": 90, "name": "John", "age": 24}
@@ -70,7 +70,7 @@ The predicted output scores overall 42%, let us align...
   VALUE = The predicted value "23" does not match the gold "24" (score=50%).
 ```
 
-Here the Hungarian algorithm matched `"ages"` → `"age"` (Jaro similarity 92%), even though they're not identical. The key `"title"` in the prediction has no good gold match, and `"weight"` in the gold has no good prediction match.
+Here the Hungarian algorithm matched `"ages"` → `"age"` (Jaro similarity 92%), even though they're not identical. The key `"title"` in the candidate has no good gold match, and `"weight"` in the gold has no good candidate match.
 
 ### keyThreshold
 
@@ -126,7 +126,7 @@ pipelines today have a *fixed schema* — the model fills slots in a
 JSON shape the user already chose. In that setting the keys are
 *scaffolding*, not data: a free `keysScore = 1.0` term would just pad
 the average and compress the dynamic range that should distinguish
-good from bad predictions. Set `keyImportance = 0` (the default) to
+good from bad candidates. Set `keyImportance = 0` (the default) to
 score only values.
 
 Override the default to `keyImportance ≥ 1` when **the model chose the
@@ -182,7 +182,7 @@ got the *values* right and the keys are treated as scaffolding.
 
 ## Important caveat: key-value type consistency
 
-Because keys are matched *before* values, and the value schema is looked up from the **gold key**'s property definition, aligned gold and predicted values are expected to share one type. When they don't — typically because fuzzy key matching paired a gold key with an unrelated predicted key, or the schema declares a union type — the pair is scored `0.0` in place:
+Because keys are matched *before* values, and the value schema is looked up from the **gold key**'s property definition, aligned gold and candidate values are expected to share one type. When they don't — typically because fuzzy key matching paired a gold key with an unrelated candidate key, or the schema declares a union type — the pair is scored `0.0` in place:
 
 ```python
 from object_aligner import ObjectAligner
@@ -199,10 +199,10 @@ The soft-zero rule applies uniformly: `align()`, `metric()`, and the `skip_valid
 
 ## Extra and missing keys
 
-When the Hungarian algorithm cannot pair a gold key with any predicted key (similarity below `keyThreshold`), that key appears as unaligned:
+When the Hungarian algorithm cannot pair a gold key with any candidate key (similarity below `keyThreshold`), that key appears as unaligned:
 
-- **Missing key**: gold key with no prediction → value scored as 0.0
-- **Extra key**: predicted key with no gold match → value scored as 0.0
+- **Missing key**: gold key with no candidate → value scored as 0.0
+- **Extra key**: candidate key with no gold match → value scored as 0.0
 
 These contribute negatively to both the key score and the value score.
 

@@ -1,10 +1,10 @@
 # Object Aligner Documentation
 
-**Object Aligner** is a Python library for computing similarity scores between structured data objects. It aligns a "gold" (reference) object with a "predicted" object and produces a fine-grained similarity score in the range [0, 1], with optional human-readable descriptions of the differences.
+**Object Aligner** is a Python library for computing similarity scores between structured data objects. It aligns a "gold" (reference) object with a "candidate" object (the predicted output; the `pred` argument throughout the API) and produces a fine-grained similarity score in the range [0, 1], with optional human-readable descriptions of the differences.
 
 ## Why Object Aligner?
 
-When evaluating structured outputs — JSON objects, lists of extracted entities, configuration dicts — simple exact-match metrics are too harsh. A predicted value of `"ages"` vs. a gold value of `"age"` should not score 0%. Object Aligner solves this by:
+When evaluating structured outputs — JSON objects, lists of extracted entities, configuration dicts — simple exact-match metrics are too harsh. A candidate value of `"ages"` vs. a gold value of `"age"` should not score 0%. Object Aligner solves this by:
 
 - **Recursively** aligning objects of any nesting depth
 - Supporting **fuzzy matching** for strings (Jaro similarity) and numbers (inverse difference)

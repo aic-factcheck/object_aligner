@@ -2,7 +2,7 @@
 
 [Docs](index.md) › Plain-English Description
 
-`metric()` answers *how well* a prediction matches the gold. `attribute()`
+`metric()` answers *how well* a candidate matches the gold. `attribute()`
 answers *where the deficit lives*. `repair()` answers *what to change*.
 `feedback()` produces a prompt-optimizer-shaped feedback string.
 **`describe()`** complements them with a different output: a
@@ -469,8 +469,8 @@ chapter-specific template-key table that has no natural home there.
 | `describe.id.mismatch` | `indent`, `gold`, `pred`, `score`, `score_pct` | `idScope` leaf, mismatched (defaults to empty) |
 | `describe.list.match` | `indent`, `score`, `score_pct` | List, all children matched |
 | `describe.list.mismatch` | `indent`, `score`, `score_pct` | List, some children mismatched |
-| `describe.list.excess` | `indent`, `gold`, `pred`, `score`, `score_pct` | Predicted list item with no gold counterpart |
-| `describe.list.missing` | `indent`, `gold`, `pred`, `score`, `score_pct` | Gold list item with no predicted counterpart |
+| `describe.list.excess` | `indent`, `gold`, `pred`, `score`, `score_pct` | Candidate list item with no gold counterpart |
+| `describe.list.missing` | `indent`, `gold`, `pred`, `score`, `score_pct` | Gold list item with no candidate counterpart |
 | `describe.dict.match` | `indent`, `score`, `score_pct` | Dict, all children matched |
 | `describe.dict.mismatch` | `indent`, `score`, `score_pct` | Dict, some children mismatched |
 | `describe.dict.key.match` | `indent`, `gold`, `pred`, `score`, `score_pct` | Dict child, key part matched |

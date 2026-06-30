@@ -2,11 +2,15 @@
 
 [Docs](index.md) › Referential Alignment
 
-This chapter covers **referential alignment** — a mode in which selected
-primitive fields are treated as **id handles** whose concrete values are
-arbitrary. Object Aligner discovers a one-to-one mapping between the gold
-ids and the predicted ids for each *id scope* you declare, and compares
-*references* through that mapping instead of by raw value equality.
+This chapter covers **referential alignment** — a scoring mode that is
+**relabel-invariant**: selected primitive fields are treated as **id handles**
+whose concrete values are arbitrary, so the score does not depend on the
+particular identifiers each side chose. Object Aligner discovers a one-to-one
+mapping (a *bijection*) between the gold ids and the candidate ids for each
+*id scope* you declare, and compares *references* through that mapping instead
+of by raw value equality. In the paper's vocabulary, a scope is a named set of
+**records** (the items bearing an `idScope` field), like primary and foreign
+keys in a relational model.
 
 This lets you match graphs and multi-graphs (parent/child relations, group
 memberships, citation networks, …) even when the two sides assign different
@@ -219,7 +223,7 @@ ObjectAligner(schema).metric(gold, pred)
 ```
 
 The `members` array is matched in reorder mode, so members can appear in any
-order in the prediction; the bijection on the `person` scope makes both
+order in the candidate; the bijection on the `person` scope makes both
 multi-graphs identical.
 
 ---
@@ -303,7 +307,7 @@ don't list the scope dependencies anywhere.
 
 ## Example 4 — dangling pred ref
 
-A predicted reference that points at an id not present in `pred`'s definer
+A candidate reference that points at an id not present in `pred`'s definer
 list scores `0` in place — it does not raise.
 
 ```python
@@ -344,7 +348,7 @@ and tracked separately. Any pred reference to `999` will compare against
 `mapping[some_gold_id]` and never match — so each such ref scores `0`. The
 overall metric drops below `1.0` as a result.
 
-The same applies symmetrically to missing predictions (gold has an entity
+The same applies symmetrically to missing candidates (gold has an entity
 absent from pred): the corresponding `mapping[gold_id] = None`, so every
 gold reference involving that id scores `0`.
 
@@ -391,7 +395,8 @@ schema = {
 ```
 
 When two definer items share all of their own non-id, non-ref properties the
-property cost matrix has tied rows. By default Object Aligner runs
+property cost matrix has tied rows. The paper calls such items
+**property-identical twins** (or just *twins*). By default Object Aligner runs
 **Weisfeiler–Leman (WL) color refinement** over the same-scope ref graph and
 uses the resulting structural color to break those ties, so twins that are
 *structurally* distinct align deterministically:
@@ -520,7 +525,7 @@ arbitrary tie-break — construct the aligner with `id_disambiguation="none"`.
 
 ## Transferable feedback for reference errors
 
-`aligner.feedback()` describes a mis-routed `ref` by the prediction's own ids by
+`aligner.feedback()` describes a mis-routed `ref` by the candidate's own ids by
 default (`change to 'p1'`). For prompt-optimizer reflection slots that is a
 per-sample renumbering, not a reusable lesson. Pass
 `referential_feedback="semantic"` (constructor or per-call) to instead describe

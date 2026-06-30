@@ -145,7 +145,7 @@ class _SchemaMixin:
         """Pre-walk the schema and raise ``ValueError`` if any array node
         sets both ``ignoreExcess`` and ``ignoreMissing``. The combination
         would score the mean over matched pairs only, which rewards omitting
-        hard items (a strictly closer prediction can score lower); it is
+        hard items (a strictly closer candidate can score lower); it is
         rejected at construction instead of emitting a gameable score."""
 
         def walk(node, schema_path):

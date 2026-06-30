@@ -3,6 +3,13 @@
 Mixed into ``ObjectAligner``. Collects id scopes from the schema, topologically
 orders them, validates the gold/pred reference graphs, and derives the per-scope
 gold-to-pred id bijection via the Hungarian assignment (optionally WL-refined).
+
+This implements the paper's *referential alignment*: a *relabel-invariant*
+scoring mode in which an ``idScope`` field is an identifier and ``ref`` fields
+are references to it (like primary/foreign keys). A scope is a named set of
+*records* (the items bearing the ``idScope`` field); the derived bijection maps
+gold ids to candidate ids so references are scored through it rather than by
+raw value equality.
 """
 import warnings
 

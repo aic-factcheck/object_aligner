@@ -2,7 +2,7 @@
 
 [Docs](index.md) › Prompt-Optimizer Feedback
 
-`metric()` answers *how well* a prediction matches the gold. `attribute()`
+`metric()` answers *how well* a candidate matches the gold. `attribute()`
 answers *where the deficit lives*. `repair()` answers *what to change*.
 **`feedback()`** takes the final step: it turns those signals into a
 **top-K ranked, prescriptive, optimizer-shaped feedback string** suitable
@@ -299,7 +299,7 @@ See [Referential Alignment](referential.md) for the underlying
 
 ### Example 7.5 — Transferable referential feedback (`referential_feedback="semantic"`)
 
-The default `ref_fix` line names the prediction's own ids (`change to 'p1'`).
+The default `ref_fix` line names the candidate's own ids (`change to 'p1'`).
 That is directly actionable for *this* sample, but it is a per-sample
 renumbering — useless as a lesson a prompt optimizer could carry to the next
 input. Opt into `referential_feedback="semantic"` to describe the **gold
@@ -365,7 +365,7 @@ Behaviour notes:
   no ref ops to enrich, so the output equals the literal mode — safe to enable
   unconditionally.
 - **Missing endpoint.** When the gold endpoint has no counterpart in the
-  prediction (a `ref_fix_no_target` op), the line reads "… should point to a
+  candidate (a `ref_fix_no_target` op), the line reads "… should point to a
   node with concept 'confirm-01', but your output has no such node."
 - **Honest fallback.** If the gold endpoint has no discriminating property, or a
   property-twin makes it ambiguous, the line either hedges
@@ -375,7 +375,7 @@ Behaviour notes:
 
 The discriminative properties are the definer's direct-child scalar fields
 (excluding the id and any `ref` fields) — the same fields the referential cost
-matrix already compares. The relation label is read from the **prediction's**
+matrix already compares. The relation label is read from the **candidate's**
 edge object. Wording is fully customizable via the `feedback.refsem.*` and
 `feedback.op.*.semantic` template keys (see [API reference](#api-reference)).
 
@@ -698,8 +698,8 @@ fragments, then formats one of the `.semantic` op skeletons.
 | `feedback.refsem.relation` | edge-label prefix (trailing space intentional) | `relation_label` |
 | `feedback.refsem.target` | gold endpoint, alignment certain | `scope`, `gold_props` |
 | `feedback.refsem.target_ambiguous` | gold endpoint, property-twin hedge | `scope`, `gold_props` |
-| `feedback.refsem.used` | wrong endpoint the prediction used | `scope`, `pred_props` |
-| `feedback.refsem.used_dangling` | predicted reference resolves to nothing | _(none)_ |
+| `feedback.refsem.used` | wrong endpoint the candidate used | `scope`, `pred_props` |
+| `feedback.refsem.used_dangling` | candidate reference resolves to nothing | _(none)_ |
 | `feedback.op.ref_fix.semantic` | semantic `ref_fix` skeleton | `rank`, `path`, `scope`, `relation`, `target`, `used`, `score_delta`, `score_delta_pct` |
 | `feedback.op.ref_fix_no_target.semantic` | semantic `ref_fix_no_target` skeleton | `rank`, `path`, `scope`, `relation`, `target`, `score_delta`, `score_delta_pct` |
 

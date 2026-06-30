@@ -13,6 +13,11 @@ single signature→token dictionary shared across both sides each round. Identic
 structural signatures therefore receive identical integer tokens on both sides,
 which is what makes the per-side colors comparable — without ever consulting a
 cross-side id mapping (so no bootstrapping problem). See ``docs/referential.md``.
+
+In the paper's terms, 1-WL is the tractable approximation to the graph
+isomorphism test used to break ties between *property-identical twins* —
+records that agree on every non-id, non-ref attribute and so are
+indistinguishable to the property cost matrix, yet differ in structure.
 """
 
 from dataclasses import dataclass, field

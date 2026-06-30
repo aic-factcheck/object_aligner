@@ -3,7 +3,7 @@
 [Docs](index.md) › Semantic Similarity
 
 Object Aligner's built-in string metrics (`jaro`, `levenshtein`, ...)
-operate on characters. They work well when the predicted string is a
+operate on characters. They work well when the candidate string is a
 *typo* or a *rephrasing of the same surface form*, but they cannot tell
 that `"Revenue grew 12%."` and `"Earnings rose by twelve percent."`
 mean roughly the same thing.
@@ -12,7 +12,7 @@ This chapter documents the **semantic similarity** layer: a
 custom-metric implementation backed by an embedding model. Strings are
 encoded into dense vectors via a configurable backend (OpenAI cloud,
 `llama-cpp` on localhost, future local Transformers); the metric
-returns the cosine similarity between the gold and predicted vectors,
+returns the cosine similarity between the gold and candidate vectors,
 mapped into $[0, 1]$. Caching, batching, and an OpenAI-compatible HTTP
 transport are provided so users do not have to reinvent them.
 
@@ -108,7 +108,7 @@ does not require a running server.
 ### Cosine and sign convention
 
 Let $\mathbf{e}(t)$ denote the embedding of a string $t$. The metric
-computes the cosine between the gold and predicted embeddings, both
+computes the cosine between the gold and candidate embeddings, both
 defensively L2-normalised:
 
 $$

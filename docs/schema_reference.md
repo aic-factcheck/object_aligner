@@ -75,7 +75,7 @@ No additional keywords. Booleans are always compared exactly.
 
 Allow a primitive field to act as an *id* whose concrete value is arbitrary;
 other primitives can *reference* such ids and are compared via an inferred
-bijection between gold and predicted ids rather than by raw value equality.
+bijection between gold and candidate ids rather than by raw value equality.
 
 | Keyword | Type | Default | Applies to | Description |
 |---------|------|---------|------------|-------------|
@@ -126,7 +126,7 @@ always scores `1.0`; both-value runs the existing primitive comparator.
 
 To use `nullScore`, declare nullability in the schema's `type` (e.g.
 `type: ["string", "null"]`), otherwise standard JSON Schema validation
-rejects the null prediction before alignment runs. `nullScore` itself
+rejects the null candidate before alignment runs. `nullScore` itself
 is validated at construction time: a non-real or out-of-range value
 raises `ValueError`.
 
@@ -145,7 +145,7 @@ downstream surface (`MatchItem.kind == "null"`,
 | `prefixItems` ⚡ | list[object] | — | Per-position schemas for the fixed-length prefix. Each element is a schema object. |
 | `prefixWeights` ⚡ | list[float] | all `1.0` | Weight for each prefix position. Length must match `prefixItems`. Normalized internally. |
 | `order` ⚡ | string | `"fixed"` | Alignment strategy for `items`: `"fixed"` (DP sequence alignment) or `"align"` (Hungarian reordering) |
-| `ignoreExcess` ⚡ | bool | `false` | If true, extra predicted items don't count toward normalization denominator. Mutually exclusive with `ignoreMissing` (both → `ValueError` at construction). |
+| `ignoreExcess` ⚡ | bool | `false` | If true, extra candidate items don't count toward normalization denominator. Mutually exclusive with `ignoreMissing` (both → `ValueError` at construction). |
 | `ignoreMissing` ⚡ | bool | `false` | If true, missing gold items don't count toward normalization denominator. Mutually exclusive with `ignoreExcess`. |
 | `prefixImportance` ⚡ | float | — | Weight of prefix score in combined prefix+items score. **Required** when both `prefixItems` and `items` are present. |
 | `restImportance` ⚡ | float | — | Weight of tail (`items`) score. **Required** when both `prefixItems` and `items` are present. |
