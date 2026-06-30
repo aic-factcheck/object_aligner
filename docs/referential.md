@@ -1,4 +1,4 @@
-# 8. Referential Alignment
+# 🕸️ Referential Alignment
 
 [Docs](index.md) › Referential Alignment
 
@@ -311,6 +311,25 @@ A candidate reference that points at an id not present in `pred`'s definer
 list scores `0` in place — it does not raise.
 
 ```python
+schema = {
+    "type": "object",
+    "keyScore": "exact",
+    "properties": {
+        "people": {"type": "array", "order": "align",
+            "items": {"type": "object", "keyScore": "exact",
+                "properties": {
+                    "id":   {"type": "integer", "idScope": "person"},
+                    "name": {"type": "string"},
+                }}},
+        "relations": {"type": "array", "order": "align",
+            "items": {"type": "object", "keyScore": "exact",
+                "properties": {
+                    "source": {"type": "integer", "ref": "person"},
+                    "target": {"type": "integer", "ref": "person"},
+                    "type":   {"type": "string", "score": "exact"},
+                }}},
+    },
+}
 gold = {
     "people": [{"id": 1, "name": "Alice"}, {"id": 2, "name": "Bob"}],
     "relations": [{"source": 1, "target": 2, "type": "knows"}],
@@ -321,7 +340,7 @@ pred = {
 }
 
 ObjectAligner(schema).metric(gold, pred)
-# {'score': < 1.0 }  — the 9999 ref position contributes 0
+# {'score': 0.8333333333333333}  — the 9999 ref position contributes 0, the rest match
 ```
 
 Dangling refs in **gold** are treated as a hard `jsonschema.ValidationError`
@@ -448,8 +467,8 @@ aligner.metric(gold, pred)
 ```
 
 Either pairing yields the same score here, so the residual ambiguity is
-harmless. To reproduce the pre-WL behavior exactly — property-only cost plus an
-arbitrary tie-break — construct the aligner with `id_disambiguation="none"`.
+harmless. For property-only cost with an arbitrary tie-break and no structural
+refinement, construct the aligner with `id_disambiguation="none"`.
 
 ---
 
@@ -500,9 +519,8 @@ arbitrary tie-break — construct the aligner with `id_disambiguation="none"`.
   3-cycles — both 2-regular, so 1-WL assigns every vertex the same color)
   remain non-unique; for those the assignment is arbitrary but
   score-invariant, and `warn_on_ambiguous_mapping=True` reports the residual
-  case. `id_disambiguation="none"` disables refinement entirely and restores
-  the pre-WL property-only behavior. Tighter refinement ($k$-WL, ref-informed
-  bijections) is possible future work.
+  case. `id_disambiguation="none"` disables refinement entirely and uses
+  property-only cost.
 - **Cycles in the scope dependency graph.** Each cycle member is aligned
   using non-ref properties only; the warning notes the affected scopes.
 - **Primitives only.** Ids must be `string`, `integer`, or `number`. Tuple
@@ -513,8 +531,11 @@ arbitrary tie-break — construct the aligner with `id_disambiguation="none"`.
 - **Schema walk coverage.** `idScope` and `ref` are discovered only under
   `properties`, `items`, and `prefixItems`. Declarations buried inside
   `allOf`, `anyOf`, `oneOf`, `$ref`, `additionalProperties`, or
-  `patternProperties` are not picked up — a stray `ref` of that shape will
-  raise at construction as `'ref' to undefined idScope`.
+  `patternProperties` are not picked up — such a `ref` is **silently
+  ignored** (scored as an ordinary primitive, with no `idScope`/`ref`
+  semantics and no warning), rather than raising at construction. Only a
+  *discovered* `ref` (one reachable through `properties`/`items`/`prefixItems`)
+  whose scope name is undefined raises `'ref' to undefined idScope`.
 - **Per-call context.** Each `ObjectAligner.align()` / `metric()` call
   creates its own `_AlignContext` carrying the per-call referential
   bookkeeping (current mappings, pred id sets, masking flags). No state

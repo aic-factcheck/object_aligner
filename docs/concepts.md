@@ -1,10 +1,10 @@
-# 1. Concepts & Architecture
+# 🌳 Concepts & Architecture
 
 [Docs](index.md) › Concepts & Architecture
 
 ## The Big Picture
 
-Object Aligner compares two structured objects — a **gold** (ground truth / reference) and a **candidate** (the predicted output, passed as the `pred` argument) — and returns a similarity score between 0 and 1, plus optional explanation of how they differ. In the accompanying paper this score is written $\mathrm{score}(g, p \mid S) \in [0, 1]$, where $g$ is the gold object, $p$ the candidate, and $S$ the schema.
+Object Aligner compares two structured objects — a **gold** (ground truth / reference) and a **candidate** (the predicted output, passed as the `pred` argument) — and returns a similarity score between 0 and 1, plus optional explanation of how they differ. In the accompanying paper this score is written $\mathrm{s}(g, p \,;\, S) \in [0, 1]$, where $g$ is the gold object, $p$ the candidate, and $S$ the schema.
 
 The comparison is governed by a **schema** that tells the aligner:
 
@@ -45,6 +45,12 @@ Every alignment result is wrapped in one of three frozen dataclasses:
 
 All scores are in **[0, 1]** where 1.0 means perfect match.
 
+The table lists the primary fields. All three dataclasses also carry `kind`
+(see [`null_handling.md`](null_handling.md) and [`referential.md`](referential.md))
+and `confidence` (see [`confidence.md`](confidence.md)); `MatchItem` additionally
+carries an `aux` field. These default to `""` / `1.0` / `None` and appear in the
+`repr`.
+
 ```python
 from object_aligner import MatchItem, MatchList, MatchDict
 
@@ -80,10 +86,6 @@ It provides two primary methods:
 
 For post-alignment analysis, `ObjectAligner` exposes four sibling outputs all derived from the same match tree: [`describe()`](describe.md) walks the tree into human-readable prose, [`attribute()`](attribution.md) decomposes the deficit into per-path contributions, [`repair()`](repair.md) emits scored RFC 6902-flavored repair ops, and [`feedback()`](feedback.md) renders an optimizer-ready prescriptive feedback string on top of them.
 
-### Migration note
-
-The older `ObjectAligner("name", schema)` constructor form and `get_name()` were removed.
-
 ## Alignment Flow
 
 ```
@@ -101,16 +103,6 @@ ObjectAligner.align(gold, pred)
 ```
 
 Every branch is **recursive**: a list of dicts of lists will be handled naturally by the dispatcher.
-
-## Utility Functions
-
-| Function | Purpose |
-|----------|---------|
-| `similarity_exact(a, b)` | Returns 1.0 if `a == b`, else 0.0 |
-| `similarity_num_inv_diff(a, b)` | Returns `1 / (1 + |a - b|)` — closer numbers score higher |
-| `similarity_string_jaro(a, b)` | Jaro normalized similarity between two strings |
-| `path2str(p)` | Converts an alignment path (list of keys/indices) to a readable string |
-| `to_pct_str(v)` | Formats a fraction as a percentage string, e.g. `"87%"` |
 
 ---
 

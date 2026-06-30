@@ -1,4 +1,4 @@
-# 4. Dictionaries & Objects
+# 🗂️ Dictionaries & Objects
 
 [Docs](index.md) › Dictionaries & Objects
 
@@ -65,12 +65,22 @@ print(result["description"])
 
 Output:
 ```
-The predicted output scores overall 42%, let us align...
+The predicted output scores overall 42%, let us align the predicted output to the gold and analyze the differences:
+The predicted dictionary scores 42%:
+  KEY = The predicted key "title" does not match the gold "None" (score=0%).
+  VALUE = The predicted value "Mr." does not match the gold "None" (score=0%).
+
+  KEY = The predicted key "None" does not match the gold "weight" (score=0%).
+  VALUE = The predicted value "None" does not match the gold "90" (score=0%).
+
+  KEY = The predicted key "name" exactly matches the gold.
+  VALUE = The predicted value "Johny" does not match the gold "John" (score=93%).
+
   KEY = The predicted key "ages" does not match the gold "age" (score=92%).
   VALUE = The predicted value "23" does not match the gold "24" (score=50%).
 ```
 
-Here the Hungarian algorithm matched `"ages"` → `"age"` (Jaro similarity 92%), even though they're not identical. The key `"title"` in the candidate has no good gold match, and `"weight"` in the gold has no good candidate match.
+Here the Hungarian algorithm matched `"ages"` → `"age"` (Jaro similarity 92%), even though they're not identical. The key `"title"` in the candidate has no good gold match, and `"weight"` in the gold has no good candidate match — those show up as pairings against `None`.
 
 ### keyThreshold
 
@@ -116,10 +126,12 @@ With this schema, a mismatch on `"id"` hurts the score three times as much as a 
 The final dictionary score combines the key score and the value score:
 
 $$
-\text{dictScore} = \frac{w_k \cdot \text{keysScore} + w_v \cdot \text{valuesScore}}{w_k + w_v}
+\mathrm{s} = \frac{w_K \cdot s_{\mathrm{key}} + w_V \cdot s_{\mathrm{val}}}{w_K + w_V}
 $$
 
-where $w_k$ is `keyImportance` and $w_v$ is `valueImportance`.
+where $w_K$ is `keyImportance` and $w_V$ is `valueImportance`, $s_{\mathrm{key}}$
+is the aggregate key score and $s_{\mathrm{val}}$ the aggregate value score (the
+paper's Eq. for maps).
 
 **Default: `keyImportance=0`, `valueImportance=1`.** Most evaluation
 pipelines today have a *fixed schema* — the model fills slots in a

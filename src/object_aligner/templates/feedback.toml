@@ -62,8 +62,8 @@
 
 # --- Semantic referential feedback (opt-in) ---------------------------------
 # Only used when referential_feedback="semantic" (constructor or per-call). The
-# default "literal" mode never touches these keys, so default output stays
-# byte-identical. The renderer composes a ref op line from the fragments below
+# default "literal" mode never touches these keys. The renderer composes a ref
+# op line from the fragments below
 # (target / used / relation clauses), then formats one of the op skeletons. If
 # the gold endpoint has no discriminating property, OA falls back to the literal
 # "feedback.op.ref_fix" / "feedback.op.ref_fix_no_target" line for that op.

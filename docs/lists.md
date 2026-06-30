@@ -1,4 +1,4 @@
-# 3. Lists & Arrays
+# 📚 Lists & Arrays
 
 [Docs](index.md) › Lists & Arrays
 
@@ -28,7 +28,7 @@ schema = {
 }
 aligner = ObjectAligner(schema, generate_description=True)
 
-# Student got 2nd and 3rd right, missed the 1st
+# Student got the last two right; the first answer is wrong
 gold = [42, 7, 13]
 pred = [99, 7, 13]
 result = aligner.metric(gold, pred)
@@ -37,11 +37,18 @@ print(result["description"])
 
 Output:
 ```
-The predicted output scores overall 67%, let us align...
-  The predicted value "99" does not match the gold "42" (score=0%).
+The predicted output scores overall 50%, let us align the predicted output to the gold and analyze the differences:
+The predicted list scores 50%:
+  The predicted output misses the "42" list item from the gold.
+  The predicted list item "99" is excessive, it was not in the gold.
   The predicted value "7" exactly matches the gold.
   The predicted value "13" exactly matches the gold.
 ```
+
+The DP aligner does **not** force a positional pairing when it scores `0`:
+because `99` vs `42` is a complete mismatch, it is cheaper to treat `42` as a
+*missing* item and `99` as an *excess* item than to keep them as a scored pair.
+Two of the four positions are perfect, so the list scores 50%.
 
 ### Different-length lists with fixed order
 

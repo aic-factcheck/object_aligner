@@ -1,13 +1,13 @@
 """Tree-walk score attribution.
 
 Walks a match tree returned by ``ObjectAligner.align()`` and produces a ranked
-per-path decomposition of the score deficit ``(1 - S)``.
+per-path decomposition of the score deficit ``(1 - s)``.
 
 Every internal node's score is a convex combination of its children's
 scores under the chosen Hungarian/DP assignment, so
 
-    S = sum_L c_L * s_L,
-    1 - S = sum_L c_L * (1 - s_L),
+    s = sum_L c_L * s_L,
+    1 - s = sum_L c_L * (1 - s_L),
 
 where ``c_L`` (the *effective weight*) is the product of per-aggregator alpha
 factors along the path from the root to leaf ``L``. This module produces, for
@@ -17,9 +17,8 @@ This per-location ``contribution`` is exactly the paper's repair-operation score
 delta, ``Δ(op) = c_w * (1 - s_w)``; ``c_L`` is the effective weight ``c_w``
 specialized to a leaf ``L``.
 
-Counterfactual attribution is intentionally left out of v1; the API shape
-(``AttributionResult.residual``) leaves room for a future ``mode="counterfactual"``
-that re-runs ``align()`` on patched inputs.
+Counterfactual attribution is not implemented; ``AttributionResult.residual``
+surfaces the unattributed remainder.
 """
 
 from dataclasses import dataclass, field
@@ -43,12 +42,13 @@ class AttributionEntry:
         path: RFC 6901 JSON Pointer locating the node in the gold tree.
         score: Local similarity in `[0, 1]` at this node.
         weight: Accumulated weight along the root-to-node path.
-        contribution: Share of the overall deficit `1 - S` owed to this
+        contribution: Share of the overall deficit `1 - s` owed to this
             node, equal to `weight * (1 - score)`.
         gold: Gold value at this node (or sentinel for missing positions).
         pred: Predicted value at this node (or sentinel).
         is_leaf: `True` if this row is a leaf (vs. a subtree rollup).
-        leaf_kind: For leaves, `"item"` / `"ref"` / `"id"` / `""`.
+        leaf_kind: For leaves, the `MatchItem.kind`: `"id"` / `"ref"` /
+            `"null"` / `"absent"` / `""`.
         node_kind: For non-leaves, the match-node kind passed through to
             attribution consumers.
         part: `"key"` or `"value"` for dict-child rows; otherwise `"value"`.

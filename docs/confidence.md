@@ -1,4 +1,4 @@
-# 15. Alignment Confidence
+# 📈 Alignment Confidence
 
 [Docs](index.md) › Alignment Confidence
 
@@ -10,14 +10,13 @@ algorithm was to each match. A pair where the chosen column was the
 clear winner is *stable*; a pair where the second-best column was nearly
 identical is *fragile*.
 
-This chapter documents the v1 **alignment confidence** feature:
+This chapter documents the **alignment confidence** feature:
 a per-pair stability score in $[0, 1]$, aggregated up the match tree
 onto `MatchItem.confidence` / `MatchList.confidence` /
 `MatchDict.confidence`, and consumed by `feedback()` and `describe()`
 through opt-in flags. None of it changes default behaviour — when
 `compute_confidence=False` (the default), every `confidence` field is
-`1.0` and `feedback()` / `describe()` produce byte-identical output to
-pre-confidence releases.
+`1.0` and `feedback()` / `describe()` omit confidence from their output.
 
 ---
 
@@ -26,7 +25,7 @@ pre-confidence releases.
 ```python
 from object_aligner import ObjectAligner
 
-schema = {"type": "object", "properties": {
+schema = {"type": "object", "keyImportance": 1, "properties": {
     "name": {"type": "string"},
     "age":  {"type": "integer"},
     "email": {"type": "string"},
@@ -40,6 +39,9 @@ pred = {"naem": "Ad",  "years": 41, "mail":  "ada@x"}
 # 1. Read confidence off the match tree
 match = aligner.align(gold, pred)
 print(round(match.confidence, 3))           # 0.612 — dict-level confidence
+                                            # (keyImportance=1 makes key-pairing
+                                            #  confidence feed into the blend;
+                                            #  the default 0 would give 1.0)
 
 # 2. Use it to rerank feedback by expected gain (Δs × c)
 print(aligner.feedback(gold, pred, rank_by="expected_gain").text)
@@ -94,9 +96,9 @@ At one Hungarian site let
 
 - $n, m$ — gold and pred sizes (items, or keys),
 - $d = \max(n, m)$,
-- $S \in [0, 1]^{d \times d}$ — the zero-padded similarity matrix,
+- $M \in [0, 1]^{d \times d}$ — the zero-padded similarity matrix,
 - $\pi^{\star}$ — the assignment returned by
-  `linear_sum_assignment(-S)`,
+  `linear_sum_assignment(-M)`,
 - $\pi^{\star -1}$ — the inverse mapping (column → row).
 
 For each chosen pair $(i, \pi^{\star}(i))$ with both indices in range
@@ -104,13 +106,13 @@ For each chosen pair $(i, \pi^{\star}(i))$ with both indices in range
 the row's second-best column:
 
 $$
-m_i^{\text{row}} \;=\; S_{i,\pi^{\star}(i)} \;-\; \max_{j \ne \pi^{\star}(i)} S_{ij}.
+m_i^{\text{row}} \;=\; M_{i,\pi^{\star}(i)} \;-\; \max_{j \ne \pi^{\star}(i)} M_{ij}.
 $$
 
 The symmetric **per-column margin** is
 
 $$
-m_j^{\text{col}} \;=\; S_{\pi^{\star -1}(j),\, j} \;-\; \max_{i \ne \pi^{\star -1}(j)} S_{ij}.
+m_j^{\text{col}} \;=\; M_{\pi^{\star -1}(j),\, j} \;-\; \max_{i \ne \pi^{\star -1}(j)} M_{ij}.
 $$
 
 The **per-pair confidence (margin, symmetric, clipped to $[0, 1]$)** is
@@ -129,10 +131,10 @@ For excess / missing pairs (one side is zero-padding), $c := 1.0$ — the
 item is simply unmatched, there is no pairing ambiguity to report.
 
 The **entropy method** (`confidence_method="entropy"`) softmaxes each
-row of $S$ over its $m$ unpadded columns with a temperature $\beta$:
+row of $M$ over its $m$ unpadded columns with a temperature $\beta$:
 
 $$
-p_{ij} \;=\; \frac{\exp(\beta\, S_{ij})}{\sum_{k=0}^{m-1} \exp(\beta\, S_{ik})},
+p_{ij} \;=\; \frac{\exp(\beta\, M_{ij})}{\sum_{k=0}^{m-1} \exp(\beta\, M_{ik})},
 \qquad
 H_i \;=\; -\sum_{j=0}^{m-1} p_{ij} \log p_{ij},
 $$
@@ -141,7 +143,8 @@ $$
 c_i^{\text{ent}} \;=\; 1 \;-\; \frac{H_i}{\log m}.
 $$
 
-For padded rows ($i \ge n$): $c_i^{\text{ent}} := 1.0$. The temperature
+For padded rows or columns ($i \ge n$ or $\pi^{\star}(i) \ge m$):
+$c_i^{\text{ent}} := 1.0$. The temperature
 $\beta$ (constructor parameter `confidence_entropy_temperature`,
 default $8.0$) controls how sharply the softmax distinguishes nearby
 similarities; with $\beta = 8$ a Jaro 0.95 vs Jaro 0.80 row pair gives
@@ -161,7 +164,7 @@ for the score:
 
 $$
 c_{\text{dict}} \;=\;
-\frac{w_k \cdot c_{\text{keys}} \;+\; w_v \cdot c_{\text{values}}}{w_k + w_v},
+\frac{w_K \cdot c_{\text{keys}} \;+\; w_V \cdot c_{\text{values}}}{w_K + w_V},
 \qquad
 c_{\text{values}} \;=\; \sum_p \tilde w_p \cdot c_{\text{child}_p},
 $$
@@ -190,9 +193,9 @@ for key, value in match.children.items():
 
 ```
 0.612
-  key=  'name' ⇄  'naem' key_conf=0.306 value_score=0.89
-  key=   'age' ⇄ 'years' key_conf=0.000 value_score=0.50
-  key= 'email' ⇄  'mail' key_conf=0.369 value_score=0.56
+  key=  'name' ⇄   'naem' key_conf=0.306 value_score=0.89
+  key=   'age' ⇄  'years' key_conf=0.000 value_score=0.50
+  key= 'email' ⇄   'mail' key_conf=0.369 value_score=1.00
 ```
 
 Three observations.
@@ -294,9 +297,7 @@ for op in aligner.repair(gold, pred, rank_by="expected_gain").ops:
 Both modes are exposed on `feedback()` and `repair()` with the same
 name and default.
 
-The default mode preserves byte-identical output of pre-confidence
-releases — flipping `rank_by` is the only thing that changes the
-ordering.
+Flipping `rank_by` is the only thing that changes the ordering.
 
 ---
 
@@ -317,10 +318,10 @@ print(aligner.feedback(
 ```
 
 ```
-The prediction scored 0.72 (deficit 0.28). Top 3 of 6 fix locations:
+The prediction scored 0.79 (deficit 0.21). Top 3 of 6 fix locations:
 1. rename key "" -> "age" at /age (value 42). Fixing this recovers +0.165.
-2. rename key "mail" -> "email" at /email (value 'ada@x'). Fixing this recovers +0.085.
-3. rename key "naem" -> "name" at /name (value 'Ada'). Fixing this recovers +0.032.
+2. rename key "naem" -> "name" at /name (value 'Ada'). Fixing this recovers +0.032.
+3. rename key "mail" -> "email" at /email (value 'ada@x'). Fixing this recovers +0.011.
 Focus on key-rename errors — they account for 100% of the deficit shown.
 Diagnostic notes (low-confidence pairings):
 ~ /: pairing between gold and predicted items was ambiguous (confidence 61%). Make these items more distinctive before fixing deeper field-level errors.
@@ -346,13 +347,16 @@ print(aligner.describe(gold, pred, show_confidence=True).text)
 ```
 
 ```
-The predicted output scores overall 72%, let us align the predicted output to the gold and analyze the differences:
-The predicted dictionary scores 72%: (low confidence 0.61)
+The predicted output scores overall 79%, let us align the predicted output to the gold and analyze the differences:
+The predicted dictionary scores 79%: (confidence 0.61)
   KEY = The predicted key "naem" does not match the gold "name" (score=92%). (low confidence 0.31)
   VALUE = The predicted value "Ad" does not match the gold "Ada" (score=89%).
 
   KEY = The predicted key "years" does not match the gold "age" (score=51%). (low confidence 0.00)
-  VALUE = ...
+  VALUE = The predicted value "41" does not match the gold "42" (score=50%).
+
+  KEY = The predicted key "mail" does not match the gold "email" (score=93%). (low confidence 0.37)
+  VALUE = The predicted value "ada@x" exactly matches the gold.
 ```
 
 The suffix is **banded**: silent for $c \ge 0.70$, `" (confidence X)"`
@@ -374,14 +378,15 @@ print(aligner.describe(
 ```
 
 ```
-The predicted output scores overall 72%, ...
-The predicted dictionary scores 72%: (low confidence 0.61)
+The predicted output scores overall 79%, ...
+The predicted dictionary scores 79%: (confidence 0.61)
   NOTE: dict key alignment was ambiguous (confidence 61%).
-  KEY = ...
+  KEY = The predicted key "naem" does not match the gold "name" (score=92%). (low confidence 0.31)
+  ...
 ```
 
-Both default to `False`. With both off, `describe()` returns
-byte-identical output to pre-confidence releases.
+Both default to `False`. With both off, `describe()` omits confidence
+from its output entirely.
 
 ---
 
@@ -434,8 +439,7 @@ signatures are generated under [API Reference](api.md#objectaligner).
   symmetric-clip formula uses only the existing similarity matrix; it
   does not re-solve the assignment. The truly correct quantity — "by
   how much would $V^{\star}$ drop if I forbid this specific edge?" —
-  costs $O(n)$ extra Hungarian runs per node and is out of scope for
-  v1.
+  costs $O(n)$ extra Hungarian runs per node and is out of scope.
 - **Entropy needs a temperature.** $\beta = 1$ is too smooth on
   $[0, 1]$-bounded similarities; the default $\beta = 8$ matches
   intuition for Jaro-style scores. Tune via
@@ -446,13 +450,12 @@ signatures are generated under [API Reference](api.md#objectaligner).
   `metric()` is unchanged whether or not `compute_confidence` is on.
 - **Default-off everywhere.** With default constructor and method
   flags, every `confidence` field is `1.0`, `rank_by="score_delta"`
-  reduces to the legacy sort, no `pairing_ambiguous` ops are emitted,
-  no confidence suffixes are appended. `feedback()` and `describe()`
-  output is byte-identical to releases without this feature.
-- **`metric(debug=True)` is *not* in the byte-identical contract.**
-  When `compute_confidence=True`, the debug tree gains a `confidence`
-  key on nodes whose confidence differs from `1.0`. With the default
-  `compute_confidence=False` it remains byte-identical.
+  ranks purely by score deficit, no `pairing_ambiguous` ops are emitted,
+  and no confidence suffixes are appended.
+- **`metric(debug=True)`.** When `compute_confidence=True`, the debug
+  tree gains a `confidence` key on nodes whose confidence differs from
+  `1.0`. With the default `compute_confidence=False` no such key
+  appears.
 
 ---
 

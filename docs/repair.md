@@ -1,11 +1,11 @@
-# 10. Scored JSON-Patch Repair
+# 🩹 Scored JSON-Patch Repair
 
 [Docs](index.md) › Scored JSON-Patch Repair
 
 `attribute()` tells you *where* a candidate is wrong and *how much* each
 location costs. **`repair()`** takes the next step: it emits a **ranked list
 of structured operations** that, if applied to `pred`, would close some
-fraction of the deficit $1 - S$.
+fraction of the deficit $1 - \mathrm{s}$.
 
 The shape borrows from [RFC 6902 JSON Patch](https://datatracker.ietf.org/doc/html/rfc6902):
 each op is one of `add` / `remove` / `replace`, has a JSON Pointer `path`, and
@@ -13,12 +13,10 @@ carries an estimated `score_delta`. There's also a finer `kind` discriminator
 so consumers can dispatch on op semantics (primitive value vs. key add vs.
 list reorder, etc.).
 
-The v1 flavor is *approximate*: deltas come from the same tree-walk math as
+`repair()` produces *approximate* deltas: they come from the same tree-walk math as
 [`attribute()`](attribution.md). The numbers are exact under the alignment's
 fixed Hungarian/DP assignment; in schemas with re-pairing the deltas are a
-first-order linearization (see [Caveats](#caveats)). An *exact* flavor —
-apply each op, re-run `metric()`, measure the true delta — is planned future
-work.
+first-order linearization (see [Caveats](#caveats)).
 
 ---
 
@@ -89,7 +87,7 @@ its score — the same numbers `attribute()` reports. Under the alignment's
 fixed Hungarian/DP assignment:
 
 $$
-\sum_{\mathrm{op}\in \mathrm{ops}}\mathrm{score\_delta}(\mathrm{op}) \;=\; 1 - S.
+\sum_{\mathrm{op}\in \mathrm{ops}}\mathrm{score\_delta}(\mathrm{op}) \;=\; 1 - \mathrm{s}.
 $$
 
 `RepairResult` exposes this as the `.total_delta` and `.residual` fields
@@ -143,9 +141,9 @@ show(r)
 ```
 
 ```
-score = 0.7056   deficit = 0.2944
-  replace /age                     delta=0.2500  value=30  [primitive_replace]
-  replace /name                    delta=0.0444  value='Alice'  [primitive_replace]
+score = 0.4111   deficit = 0.5889
+  replace /age                     delta=0.5000  value=30  [primitive_replace]
+  replace /name                    delta=0.0889  value='Alice'  [primitive_replace]
 ```
 
 Two leaves are imperfect. Each gets a `replace` op carrying the gold value.
@@ -214,9 +212,9 @@ contribution; the `remove` carries 0 (it does nothing alone — the pair must
 be applied together). The `add`'s value is `'alice'` because the pred value
 under the noisy key was already correct.
 
-> **Why a pair instead of `move`?** v1 sticks to `add` / `remove` /
-> `replace`. RFC 6902's `move` is the idiomatic op here and may ship as a
-> future enhancement.
+> **Why a pair instead of `move`?** `repair()` emits `add` / `remove` /
+> `replace` only. RFC 6902's `move` is the idiomatic op here, but `repair()`
+> does not emit it.
 
 ### Example 5 — Fixed list, missing item
 
@@ -378,23 +376,28 @@ schema = {
         "relations": {"type": "array", "order": "align",
             "items": {"type": "object", "keyScore": "exact",
                 "properties": {
+                    # A matching scalar (the edge label) so the reorder
+                    # Hungarian pairs the relation with its gold counterpart;
+                    # the swapped refs then surface as ref_fix ops.
+                    "label":  {"type": "string", "score": "exact"},
                     "source": {"type": "integer", "ref": "person"},
                     "target": {"type": "integer", "ref": "person"},
                 }}},
     },
 }
 gold = {"people":    [{"id": 1, "name": "Alice"}, {"id": 2, "name": "Bob"}],
-        "relations": [{"source": 1, "target": 2}]}
+        "relations": [{"label": "knows", "source": 1, "target": 2}]}
 pred = {"people":    [{"id": 53, "name": "Alice"}, {"id": 124, "name": "Bob"}],
-        "relations": [{"source": 124, "target": 53}]}      # ← swapped
+        "relations": [{"label": "knows", "source": 124, "target": 53}]}  # ← refs swapped
 r = ObjectAligner(schema).repair(gold, pred)
 show(r)
 ```
 
 ```
-score = 0.8750   deficit = 0.1250
-  replace /relations/0/source      delta=0.0625  value=53  [ref_fix]
-  replace /relations/0/target      delta=0.0625  value=124  [ref_fix]
+score = 0.6667   deficit = 0.3333
+  replace /relations/0/source      delta=0.1667  value=53  [ref_fix]
+  replace /relations/0/target      delta=0.1667  value=124  [ref_fix]
+  note: schema contains at least one order='align' list; list_item_missing / list_item_excess / primitive_replace_reorder ops use semantic paths (path points at the list, not a specific index).
 ```
 
 The `value` on a `ref_fix` op is the **pred-side** id that pred *should*
@@ -447,7 +450,7 @@ have no natural home there.
 
 | Mode | Emits | Sum invariant |
 |---|---|---|
-| `"leaf"` *(default)* | every `add`/`remove`/`replace` for an individual mismatch | $\sum \mathrm{score\_delta} = 1 - S$ |
+| `"leaf"` *(default)* | every `add`/`remove`/`replace` for an individual mismatch | $\sum \mathrm{score\_delta} = 1 - \mathrm{s}$ |
 | `"subtree"` | one `subtree_replace` per imperfect internal node | Root op equals the deficit; nested ops *contain* their descendants — not additive. |
 | `"all"` | union of the two | **Not additive.** `residual` reflects the overlap. |
 
@@ -473,6 +476,9 @@ or both dropped, gated by the `add`'s delta.
 | `key_rename_remove` | First half of a fuzzy-key-rename pair. `score_delta = 0`. |
 | `key_rename_add` | Second half; carries the full key + value gain. Shares `pair_id` with the remove. |
 | `ref_fix` | Wrong `ref` leaf. `value` is the pred-side id from the derived bijection. |
+| `ref_fix_no_target` | `ref` leaf whose gold referent has no counterpart in the candidate under the derived bijection. `value` carries the gold-side id as a best-effort apply-time replacement (works with a sibling `list_item_missing`); feedback/describe templates do not surface it, so no gold-space id leaks into user-visible text. |
+| `null_value_replace` | Null-aware leaf where exactly one of gold/pred is `None` (see [`null_handling.md`](null_handling.md)). |
+| `pairing_ambiguous` | Diagnostic-only (`op="describe"`, `score_delta=0`) — a Hungarian-paired container whose `confidence` fell below `ambiguity_threshold`. Opt-in via `include_pairing_ambiguous=True`; see [`confidence.md`](confidence.md). |
 | `subtree_replace` | Whole-subtree replacement in `granularity="subtree"` / `"all"`. |
 
 ---
@@ -489,7 +495,7 @@ the alignment is chosen by Hungarian/DP/bijection optimizers. Tree-walk
 Concretely: applying op #1 and re-running `metric()` may not produce
 exactly the score change predicted by `score_delta(op_1)` if the alignment
 shifts as a result. In the worst case, $\sum \mathrm{score\_delta}$ over
-ranked ops can exceed $1 - S$.
+ranked ops can exceed $1 - \mathrm{s}$.
 
 For prompt-optimizer feedback this is fine — a conservative ranking is
 more actionable than a fragile exact gradient. For sequential auto-repair

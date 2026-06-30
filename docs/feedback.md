@@ -1,4 +1,4 @@
-# 11. Prompt-Optimizer Feedback
+# 🧭 Prompt-Optimizer Feedback
 
 [Docs](index.md) › Prompt-Optimizer Feedback
 
@@ -129,8 +129,8 @@ $$
 [Attribution](attribution.md) and [Repair](repair.md) for the derivation).
 
 Under the alignment's fixed Hungarian/DP assignment, before filtering,
-$\sum \mathrm{score\_delta} = 1 - S$. After `top_k` and `min_score_delta`
-filtering, that exact identity no longer holds; the dropped contribution
+$\sum \mathrm{score\_delta} = 1 - \mathrm{s}$. After `top_k` and `min_score_delta`
+filtering, the displayed deltas sum to less than $1 - \mathrm{s}$; the dropped contribution
 is the difference between `FeedbackResult.n_total_ops`-worth of deltas
 and the displayed `sum(e.score_delta for e in entries)`. The flag
 `FeedbackResult.truncated` is `True` whenever filtering dropped any op
@@ -197,7 +197,7 @@ Focus on extraneous-key errors — they account for 100% of the deficit shown.
 
 ```python
 schema = {
-    "type": "object", "keyScore": "jaro",
+    "type": "object", "keyScore": "jaro", "keyImportance": 1,
     "properties": {"phoneNumber": {"type": "string"}},
 }
 aligner = ObjectAligner(schema)
@@ -209,6 +209,10 @@ The prediction scored 0.91 (deficit 0.09). Top 1 of 2 fix locations:
 1. rename key "phone" -> "phoneNumber" at /phoneNumber (value '555-1234'). Fixing this recovers +0.091.
 Focus on key-rename errors — they account for 100% of the deficit shown.
 ```
+
+The schema sets `keyImportance: 1` so the key name itself carries weight —
+with the default `keyImportance: 0` a pure key rename (identical value)
+would close zero deficit and the feedback would report a perfect score.
 
 `Top 1 of 2` because the rename produces two `RepairOp`s (`key_rename_add`
 and `key_rename_remove`), but the `_remove` template is empty by default
@@ -235,8 +239,8 @@ print(aligner.feedback(
 ```
 
 ```
-The prediction scored 0.83 (deficit 0.17). Top 1 of 1 fix locations:
-1. /items: list is missing item 'gamma'. Adding it recovers +0.167.
+The prediction scored 0.67 (deficit 0.33). Top 1 of 1 fix locations:
+1. /items: list is missing item 'gamma'. Adding it recovers +0.333.
 Focus on missing-list-item errors — they account for 100% of the deficit shown.
 ```
 
@@ -289,8 +293,8 @@ print(aligner.feedback(
 ```
 
 ```
-The prediction scored 0.75 (deficit 0.25). Top 1 of 1 fix locations:
-1. /primary: wrong reference (expected 'g1', got 'p2'). Fixing this recovers +0.250.
+The prediction scored 0.50 (deficit 0.50). Top 1 of 1 fix locations:
+1. /primary: wrong reference (got 'p2', change to 'p1'). Fixing this recovers +0.500.
 Focus on reference errors — they account for 100% of the deficit shown.
 ```
 
@@ -365,7 +369,7 @@ Behaviour notes:
   no ref ops to enrich, so the output equals the literal mode — safe to enable
   unconditionally.
 - **Missing endpoint.** When the gold endpoint has no counterpart in the
-  candidate (a `ref_fix_no_target` op), the line reads "… should point to a
+  candidate (a `ref_fix_no_target` op), the line reads "… should point to the
   node with concept 'confirm-01', but your output has no such node."
 - **Honest fallback.** If the gold endpoint has no discriminating property, or a
   property-twin makes it ambiguous, the line either hedges
@@ -419,7 +423,7 @@ for e in fb.entries:
 
 ```
 text: ''
-error_breakdown: {'primitive_replace': 0.2667, 'primitive_replace_reorder': 0.0625}
+error_breakdown: {'primitive_replace': 0.26666666666666666, 'primitive_replace_reorder': 0.0625}
   rank=1 kind=primitive_replace path=/year delta=0.2500
   rank=2 kind=primitive_replace_reorder path=/genres delta=0.0625
   rank=3 kind=primitive_replace path=/title delta=0.0167
@@ -545,9 +549,9 @@ print(fb.text)
 ```
 
 ```
-The prediction scored 0.62 (deficit 0.38). Top 2 of 2 fix locations:
-1. /a: expected 'xxxxxxxxxxxxxxxxxxx..., got 'yyyyyyyyyyyyyyyyyyy.... Fixing this recovers +0.250.
-2. /b: expected 1, got 2. Fixing this recovers +0.125.
+The prediction scored 0.00 (deficit 1.00). Top 2 of 2 fix locations:
+1. /a: expected 'xxxxxxxxxxxxxxxxxxx..., got 'yyyyyyyyyyyyyyyyyyy.... Fixing this recovers +0.500.
+2. /b: expected 1, got 2. Fixing this recovers +0.500.
 Focus on primitive-value errors — they account for 100% of the deficit shown.
 ```
 
@@ -620,8 +624,8 @@ print(aligner.feedback(
 ```
 
 ```
-The prediction scored 0.96 (deficit 0.04). Top 1 of 1 fix locations:
-1. : subtree differs. Replacing it recovers +0.035.
+The prediction scored 0.86 (deficit 0.14). Top 1 of 1 fix locations:
+1. : subtree differs. Replacing it recovers +0.142.
 Focus on subtree errors — they account for 100% of the deficit shown.
 ```
 
@@ -734,22 +738,6 @@ optimal pairing would change when one input is perturbed, the deltas are
 a first-order linearization. See
 [the `repair.md` caveat](repair.md#non-additivity-under-hungarian-dp-re-pairing)
 for the underlying math.
-
-### Stability across versions
-
-These fields are part of the **stable API** and won't change shape
-without a major version bump:
-
-- `FeedbackEntry`: `op_kind`, `path`, `score_delta`, `pair_id`.
-- `FeedbackResult`: `score`, `entries`, `style`, `truncated`,
-  `n_total_ops`, `error_breakdown`.
-- Template key set: keys may be **added** (with sensible English
-  defaults) but not renamed or removed.
-
-The wording inside `FeedbackResult.text` (and inside individual
-`FeedbackEntry.text` values) may evolve between minor versions as we
-tune the English defaults. If you depend on exact strings, override the
-relevant templates.
 
 ### Soft size budget on `text`
 

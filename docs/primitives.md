@@ -1,4 +1,4 @@
-# 2. Primitive Types
+# 🔤 Primitive Types
 
 [Docs](index.md) › Primitive Types
 
@@ -118,7 +118,7 @@ print(aligner.align(10, 12))  # score = 0.8
 print(aligner.align(10, 20))  # score = 0.0 after thresholding
 ```
 
-Integer schemas use the `integer` registry first and then fall back to the `number` registry.
+Integer schemas resolve against a single merged registry built as the numeric built-ins, then any custom `number` metrics, then any custom `integer` metrics — so a custom `integer` metric overrides a same-named `number` metric, while built-ins and custom `number` metrics remain available to integer fields.
 
 ### Schema keywords
 

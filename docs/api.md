@@ -2,7 +2,7 @@
      To update: edit the corresponding docstring in src/object_aligner/,
      then run `uv run python scripts/gen_api_docs.py`. -->
 
-# API Reference
+# 🔖 API Reference
 
 [Docs](index.md) › API Reference
 
@@ -52,13 +52,13 @@ See [`docs/concepts.md`](../concepts.md) for the architectural tour.
 - **`generate_feedback`** — Default for the `generate_feedback` parameter of `metric()`. When truthy, `metric()` returns include a `"feedback"` key. Accepts `True` / `False` / `"full"`; see [`docs/feedback.md`](../feedback.md).
 - **`feedback_templates`** — Optional partial override of the packaged feedback templates. Validated against the same allowlist machinery as `description_templates`.
 - **`feedback_style`** — One of the registered feedback styles (default `"gepa"`). Controls phrasing and synthesis-line shape.
-- **`referential_feedback`** — How `feedback()` renders `ref` / `idScope` mismatches. `"literal"` (default) uses opaque ids and is byte-identical to earlier releases. `"semantic"` instead describes the gold endpoint node the reference should connect to by its discriminative properties and the relation label — a transferable lesson for prompt optimizers. Only `feedback().text` changes; scores and every other output are identical. A no-op on schemas without `ref` / `idScope`.
+- **`referential_feedback`** — How `feedback()` renders `ref` / `idScope` mismatches. `"literal"` (default) uses opaque ids. `"semantic"` instead describes the gold endpoint node the reference should connect to by its discriminative properties and the relation label — a transferable lesson for prompt optimizers. Only `feedback().text` changes; scores and every other output are identical. A no-op on schemas without `ref` / `idScope`.
 - **`dominant_fraction_threshold`** — Fraction of the deficit that one op kind must own for the feedback synthesis line to switch between the "single dominant" and "mixed" phrasings. Defaults to `0.60`.
 - **`warn_on_ambiguous_mapping`** — If `True`, emit a `UserWarning` whenever the Hungarian-derived id mapping for an `idScope` is non-unique because of tied costs. Off by default.
-- **`compute_confidence`** — If `True`, populate the `confidence` field on `MatchItem` / `MatchList` / `MatchDict` from the similarity matrix used at each Hungarian site (`order: "align"` lists and dict-key matching). Default `False` keeps `confidence == 1.0` everywhere, which preserves byte-identical output for `feedback()` and `describe()` under default flags. See [`docs/confidence.md`](../confidence.md).
+- **`compute_confidence`** — If `True`, populate the `confidence` field on `MatchItem` / `MatchList` / `MatchDict` from the similarity matrix used at each Hungarian site (`order: "align"` lists and dict-key matching). Default `False` keeps `confidence == 1.0` everywhere, so `feedback()` and `describe()` omit confidence from their output. See [`docs/confidence.md`](../confidence.md).
 - **`confidence_method`** — `"margin"` (default) or `"entropy"`. Selects the per-pair confidence formula. Margin is a fast linear pass over the similarity matrix; entropy softmaxes each row and reports `1 - H / log m`.
 - **`confidence_entropy_temperature`** — Softmax temperature `β` used only when `confidence_method="entropy"`. Defaults to `8.0`, which puts a Jaro 0.95 vs 0.80 at roughly a 3:1 probability ratio on `[0, 1]`-bounded similarities.
-- **`id_disambiguation`** — Strategy for resolving the per-scope `idScope` bijection when definer items are not fully distinguished by their own properties. `"wl"` (default) runs Weisfeiler–Leman color refinement over the same-scope ref graph, computed independently per side, so structurally distinct definers align by structure rather than emission order. `"none"` reproduces the pre-WL behavior exactly (property-only cost plus an arbitrary tie-break). See [`docs/referential.md`](../referential.md).
+- **`id_disambiguation`** — Strategy for resolving the per-scope `idScope` bijection when definer items are not fully distinguished by their own properties. `"wl"` (default) runs Weisfeiler–Leman color refinement over the same-scope ref graph, computed independently per side, so structurally distinct definers align by structure rather than emission order. `"none"` uses property-only cost with an arbitrary tie-break (no structural refinement). See [`docs/referential.md`](../referential.md).
 - **`wl_integration`** — How the structural color enters the cost matrix when `id_disambiguation="wl"`. `"tie_break"` (default) lets the color break only *exact* ties in the property cost, so already-determined alignments never move. `"blend"` mixes the property cost and structural agreement with weight `wl_blend_lambda`, letting structure override near-tied (but not exactly tied) property costs.
 - **`wl_rounds`** — Cap on WL refinement rounds. `None` (default) runs to a stable partition (at most `|definers|` rounds).
 - **`wl_blend_lambda`** — Blend weight `λ ∈ [0, 1]` consulted only when `wl_integration="blend"`; the combined cost is `(1 - λ)·property_cost + λ·structural_term`. Defaults to `0.5`. Ignored under `"tie_break"`.
@@ -72,7 +72,7 @@ See [`docs/concepts.md`](../concepts.md) for the architectural tour.
 <!-- anchor: objectaligneralign -->
 
 ```python
-ObjectAligner.align(g, p, skip_validation=False)
+ObjectAligner.align(gold, pred, skip_validation=False)
 ```
 
 Align gold to candidate and return the match tree.
@@ -83,8 +83,8 @@ Builds a per-call context, so concurrent calls on the same
 
 **Parameters**
 
-- **`g`** — Gold (reference) object. Must match the schema unless `skip_validation=True`.
-- **`p`** — Candidate object (the predicted output). Must match the schema unless `skip_validation=True`.
+- **`gold`** — Gold (reference) object. Must match the schema unless `skip_validation=True`.
+- **`pred`** — Candidate object (the predicted output). Must match the schema unless `skip_validation=True`.
 - **`skip_validation`** — If `True`, skip JSON Schema validation of both inputs (caller is responsible for ensuring well-formedness).
 
 **Returns** — A frozen `MatchItem`, `MatchList`, or `MatchDict` whose `.score` is in `[0, 1]`. The concrete type is selected by the schema's top-level type.
@@ -92,7 +92,7 @@ Builds a per-call context, so concurrent calls on the same
 **Raises**
 
 - **`jsonschema.ValidationError`** — If validation is enabled and either input fails.
-- **`TypeError`** — If `g` and `p` are not of the same top-level Python type. Nested dict values whose Python types differ do not raise — they score `0.0` in place, matching `metric()`.
+- **`TypeError`** — If `gold` and `pred` are not of the same top-level Python type. Nested dict values whose Python types differ do not raise — they score `0.0` in place, matching `metric()`.
 
 #### `ObjectAligner.metric()`
 <!-- anchor: objectalignermetric -->
@@ -179,8 +179,8 @@ ObjectAligner.repair(gold, pred, *, granularity='leaf', min_contribution=0.0, sk
 Emit a ranked list of scored repair ops for `(gold, pred)`.
 
 Each `RepairOp` carries an estimated `score_delta` — how much of the
-deficit `1 - S` applying the op would close. v1 implements the
-*approximate* flavor only; deltas come from the tree-walk math.
+deficit `1 - s` applying the op would close. Implements the
+*approximate* flavor: deltas come from the tree-walk math.
 See [`docs/repair.md`](../repair.md) for examples.
 
 **Parameters**
@@ -242,7 +242,7 @@ LLM. The output is deterministic and template-driven. See
 - **`pred`** — Candidate object (the predicted output).
 - **`style`** — Override the constructor `description_style`. `None` defers to the instance default.
 - **`skip_validation`** — If `True`, skip JSON Schema validation.
-- **`show_confidence`** — If `True`, append a banded confidence suffix to every per-node line whose `confidence` falls below `0.70`. Requires the owning aligner to have been constructed with `compute_confidence=True`. Default preserves byte-identical output of earlier releases. See [`docs/confidence.md`](../confidence.md).
+- **`show_confidence`** — If `True`, append a banded confidence suffix to every per-node line whose `confidence` falls below `0.70`. Requires the owning aligner to have been constructed with `compute_confidence=True`. See [`docs/confidence.md`](../confidence.md).
 - **`include_ambiguous`** — If `True`, emit an extra entry above every Hungarian-paired container whose `confidence` falls below `ambiguity_threshold`. Off by default.
 - **`ambiguity_threshold`** — Confidence threshold for the ambiguous-entry emission. Default `0.30`.
 
@@ -296,7 +296,7 @@ LLM. The output is deterministic and template-driven. See
 - **`dominant_fraction_threshold`** — Override the constructor threshold for switching between "single dominant" and "mixed" synthesis-line phrasing. `None` defers to the instance default.
 - **`granularity`** — See `attribute()` / `repair()`.
 - **`skip_validation`** — If `True`, skip JSON Schema validation.
-- **`rank_by`** — `"score_delta"` (default), `"expected_gain"`, or `"confidence"`. See [`docs/confidence.md`](../confidence.md). Default preserves byte-identical output of earlier releases.
+- **`rank_by`** — `"score_delta"` (default), `"expected_gain"`, or `"confidence"`. See [`docs/confidence.md`](../confidence.md).
 - **`include_pairing_ambiguous`** — If `True`, surface a "Diagnostic notes" trailing section listing Hungarian containers whose `confidence` fell below `ambiguity_threshold`. Off by default.
 - **`ambiguity_threshold`** — Confidence threshold for the diagnostic walker. Default `0.30`.
 - **`referential_feedback`** — Override the constructor `referential_feedback` (`"literal"` / `"semantic"`). `None` defers to the instance default.
@@ -491,11 +491,11 @@ biggest losers first.
 | `path` | `str` | *(required)* | RFC 6901 JSON Pointer locating the node in the gold tree. |
 | `score` | `float` | *(required)* | Local similarity in `[0, 1]` at this node. |
 | `weight` | `float` | *(required)* | Accumulated weight along the root-to-node path. |
-| `contribution` | `float` | *(required)* | Share of the overall deficit `1 - S` owed to this node, equal to `weight * (1 - score)`. |
+| `contribution` | `float` | *(required)* | Share of the overall deficit `1 - s` owed to this node, equal to `weight * (1 - score)`. |
 | `gold` | `Any` | *(required)* | Gold value at this node (or sentinel for missing positions). |
 | `pred` | `Any` | *(required)* | Predicted value at this node (or sentinel). |
 | `is_leaf` | `bool` | *(required)* | `True` if this row is a leaf (vs. a subtree rollup). |
-| `leaf_kind` | `str` | '' | For leaves, `"item"` / `"ref"` / `"id"` / `""`. |
+| `leaf_kind` | `str` | '' | For leaves, the `MatchItem.kind`: `"id"` / `"ref"` / `"null"` / `"absent"` / `""`. |
 | `node_kind` | `str` | '' | For non-leaves, the match-node kind passed through to attribution consumers. |
 | `part` | `str` | 'value' | `"key"` or `"value"` for dict-child rows; otherwise `"value"`. |
 
@@ -534,7 +534,7 @@ generate_repairs(match_tree, schema, gold, pred, mappings: 'dict | None' = None,
 
 Generate a ranked list of scored repair ops for a match tree.
 
-Approximate flavor (v1): score deltas come from the same tree-walk
+Approximate flavor: score deltas come from the same tree-walk
 math as `tree_walk_attribution`.
 
 **Parameters**
@@ -546,7 +546,7 @@ math as `tree_walk_attribution`.
 - **`mappings`** — Per-scope `{gold_id: pred_id}` dict captured from the align-time `_AlignContext.current_mappings`. Required for emitting `ref_fix` ops; if `None`, no `ref_fix` ops are emitted and the walker falls back to using the raw gold ref value as the suggested replacement (less useful — pred uses arbitrary ids by convention).
 - **`granularity`** — `"leaf"` (default), `"subtree"`, or `"all"`.
 - **`min_contribution`** — Drop ops whose `score_delta` falls below this threshold. Atomic pairs are kept iff the carrying op passes.
-- **`rank_by`** — Sort key for the returned ops list. One of `"score_delta"` (default, descending by raw deficit closed), `"expected_gain"` (descending by `score_delta × confidence`), or `"confidence"` (descending by stability of the originating pairing). All three modes use the same deterministic tiebreaker `(path, op, kind)`. Default preserves byte-for- byte behavior of pre-confidence releases.
+- **`rank_by`** — Sort key for the returned ops list. One of `"score_delta"` (default, descending by raw deficit closed), `"expected_gain"` (descending by `score_delta × confidence`), or `"confidence"` (descending by stability of the originating pairing). All three modes use the same deterministic tiebreaker `(path, op, kind)`.
 - **`include_pairing_ambiguous`** — If `True`, walk the match tree for Hungarian-paired containers whose `confidence` falls below `ambiguity_threshold` and append a `pairing_ambiguous` op (with `score_delta = 0`) at each such path. Diagnostic only — `RepairResult.apply_to` ignores them. Off by default.
 - **`ambiguity_threshold`** — Confidence threshold for the `pairing_ambiguous` walker. Default `0.30`.
 
@@ -576,7 +576,7 @@ semantics. See [`docs/repair.md`](../repair.md) for the full
 |-------|------|---------|-------------|
 | `op` | `str` | *(required)* | One of `"add"` / `"remove"` / `"replace"`. |
 | `path` | `str` | *(required)* | RFC 6901 JSON Pointer locating the patch site. |
-| `score_delta` | `float` | *(required)* | Positive — how much of the deficit `1 - S` applying this op would close (approximate, v1). |
+| `score_delta` | `float` | *(required)* | Positive — how much of the deficit `1 - s` applying this op would close (approximate). |
 | `kind` | `str` | *(required)* | Finer discriminator (`primitive_replace`, `key_add`, `list_item_missing`, `ref_fix`, `ref_fix_no_target`, `null_value_replace`, `pairing_ambiguous`, etc.). `ref_fix_no_target` is emitted when the gold referent has no counterpart in the candidate under the derived bijection; its `value` carries the gold-side id as a best-effort apply-time replacement (works in concert with a sibling `list_item_missing` op), but feedback / describe templates do not surface that value so no gold-space id leaks into user-visible text. |
 | `value` | `Any` | None | For `add` / `replace` ops, the value to write. |
 | `gold` | `Any` | None | Gold value at the patch site (informational, useful for rendering feedback). |
@@ -628,7 +628,7 @@ examples.
 - **`match_tree`** — A match tree returned by ``ObjectAligner.align()``.
 - **`style`** — ``"default"`` (multi-line indented prose walk of the match tree) or ``"json"`` (empty ``.text``, structured ``.entries`` only).
 - **`templates`** — User template overrides (full dict, partial dict, or ``None`` for defaults).
-- **`show_confidence`** — If ``True``, append a banded confidence suffix (e.g. ``" (low confidence 0.23)"``) to every per-node line whose confidence falls below ``0.70``. Default ``False`` preserves byte-identical output of pre-confidence releases.
+- **`show_confidence`** — If ``True``, append a banded confidence suffix (e.g. ``" (low confidence 0.23)"``) to every per-node line whose confidence falls below ``0.70``. Default ``False`` omits the suffix.
 - **`include_ambiguous`** — If ``True``, emit a dedicated ``describe.list.ambiguous`` / ``describe.dict.ambiguous`` entry before walking any Hungarian-paired container whose confidence falls below ``ambiguity_threshold``. Off by default.
 - **`ambiguity_threshold`** — Confidence threshold for the ambiguous-entry emission. Default ``0.30``.
 
@@ -719,7 +719,7 @@ examples.
 - **`value_formatter`** — `(value) -> str` callable used to format `gold` / `pred` values in templates. Default truncates `repr(value)` to 80 chars.
 - **`dominant_fraction_threshold`** — Threshold above which the single-dominant synthesis line fires. Default `0.60`.
 - **`include_diagnostics`** — If `True` (default) and the underlying `RepairResult` contains `pairing_ambiguous` ops (only emitted when `aligner.feedback(..., include_pairing_ambiguous=True)` was used), render them as a trailing "Diagnostic notes" section. Set to `False` to suppress the section even when such ops are present.
-- **`referential_feedback`** — `"literal"` (default) renders `ref_fix` / `ref_fix_no_target` ops by opaque ids — byte-identical to earlier releases. `"semantic"` renders them by the gold endpoint's discriminative properties and the relation label, using `ref_endpoints`. Falls back to the literal line per-op when no descriptor / discriminator is available.
+- **`referential_feedback`** — `"literal"` (default) renders `ref_fix` / `ref_fix_no_target` ops by opaque ids. `"semantic"` renders them by the gold endpoint's discriminative properties and the relation label, using `ref_endpoints`. Falls back to the literal line per-op when no descriptor / discriminator is available.
 - **`ref_endpoints`** — `{op.path: descriptor}` built by `ObjectAligner._build_ref_endpoint_descriptors`. Required for `"semantic"` mode to have any effect; ignored otherwise.
 
 **Returns** — `FeedbackResult` whose `text` is the fully rendered top-K feedback string.

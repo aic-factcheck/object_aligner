@@ -34,19 +34,25 @@ validation:
 
 nav:
   - Home: index.md
-  - Concepts & Architecture: concepts.md
-  - Primitive Types: primitives.md
-  - Lists & Arrays: lists.md
-  - Dictionaries & Objects: dicts.md
-  - Nesting & Complex Structures: nesting.md
-  - The Metric Function: metric.md
-  - Plain-English Description: describe.md
-  - Referential Alignment: referential.md
-  - Schema Reference: schema_reference.md
-  - Per-Property Score Attribution: attribution.md
-  - Scored JSON-Patch Repair: repair.md
-  - Prompt-Optimizer Feedback: feedback.md
-  - Null Handling: null_handling.md
-  - Alignment Confidence: confidence.md
-  - Semantic Similarity: semantic.md
-  - API Reference: api.md
+  - 🌱 Foundations:
+    - 🌳 Concepts & Architecture: concepts.md
+    - 🔤 Primitive Types: primitives.md
+    - 📚 Lists & Arrays: lists.md
+    - 🗂️ Dictionaries & Objects: dicts.md
+    - 🪆 Nesting & Complex Structures: nesting.md
+  - ⭐ Core capabilities:
+    - 🕸️ Referential Alignment: referential.md
+    - 🧭 Prompt-Optimizer Feedback: feedback.md
+    - 🎯 Per-Property Score Attribution: attribution.md
+    - 🩹 Scored JSON-Patch Repair: repair.md
+  - 🛠️ Using the score:
+    - 📊 The Metric Function: metric.md
+    - 🗣️ Plain-English Description: describe.md
+    - 🧾 Schema Reference: schema_reference.md
+  - 🧩 Extensions & edge cases:
+    - 🈳 Null Handling: null_handling.md
+    - 🧬 Semantic Similarity: semantic.md
+  - 🧪 Experimental:
+    - 📈 Alignment Confidence: confidence.md
+  - 📖 Reference:
+    - 🔖 API Reference: api.md

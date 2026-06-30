@@ -380,7 +380,7 @@ HEADER = """\
      To update: edit the corresponding docstring in src/object_aligner/,
      then run `uv run python scripts/gen_api_docs.py`. -->
 
-# API Reference
+# 🔖 API Reference
 
 [Docs](index.md) › API Reference
 

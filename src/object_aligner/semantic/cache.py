@@ -2,7 +2,7 @@
 
 The cache is the middle layer of the semantic stack: it wraps an
 :class:`~object_aligner.semantic.Embedder` and adds memoisation plus
-miss-batching. Two concrete classes ship in v1:
+miss-batching. Two concrete classes ship:
 
 * :class:`InMemoryEmbeddingCache` — ``dict``-backed, no I/O. Fast and
   perfectly adequate for single-process workloads up to ~10⁵ entries.
@@ -133,7 +133,7 @@ class InMemoryEmbeddingCache(EmbeddingCache):
 
     Backing store is ``{(model_id, text): np.ndarray}``. Use this for
     single-process workloads, tests, or as a fast inner layer wrapped
-    by an outer persistent cache (the latter is out of v1 scope).
+    by an outer persistent cache (not provided here).
     """
 
     def __init__(self, embedder: Embedder):

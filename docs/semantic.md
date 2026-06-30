@@ -1,4 +1,4 @@
-# 16. Semantic Similarity
+# 🧬 Semantic Similarity
 
 [Docs](index.md) › Semantic Similarity
 
@@ -68,10 +68,11 @@ precompute(aligner, gold, pred)              # one batch HTTP call up front
 print(aligner.metric(gold, pred))             # uses the cache, no more I/O
 ```
 
-The first run hits the embedding server twice (once per string),
-populates `./.cache/oa-embeddings.sqlite`, and returns a similarity
-score that reflects semantic closeness. Every subsequent run with the
-same texts is a pure database lookup.
+The `precompute` call embeds every relevant string in a single batched
+request to the embedding server, populates `./.cache/oa-embeddings.sqlite`,
+and the subsequent `metric` call returns a similarity score that reflects
+semantic closeness using only the cache — no further I/O. Every later run
+with the same texts is a pure database lookup.
 
 ---
 
@@ -290,13 +291,17 @@ gold = ["red", "green", "blue"]
 pred = ["blue", "yellow"]
 
 precompute(aligner, gold, pred)
-print(counter.calls)
-# [['red', 'green', 'blue', 'yellow']]   — one batch call for the union.
+print(len(counter.calls), sorted(counter.calls[0]))
+# 1 ['blue', 'green', 'red', 'yellow']   — one batch call for the union.
 
 aligner.metric(gold, pred)
-print(counter.calls)
-# Same single entry — no further upstream traffic.
+print(len(counter.calls))
+# 1 — same single entry, no further upstream traffic.
 ```
+
+`precompute` deduplicates the strings through a `set`, so the order of the
+batched list is unspecified — the example sorts it only to make the printed
+output reproducible.
 
 ---
 
@@ -362,9 +367,8 @@ Signatures and parameter docs are also reachable from the generated
 - **No GPU management.** If you plug in a local Transformers model,
   the device-placement / batch-sizing logic lives in *your* `Embedder`
   subclass, not in the library.
-- **Token-level metrics (BERTScore etc.) are not in v1.** The protocol
-  allows 2-D embeddings already; the metric implementation is the
-  thing that needs to be written.
+- **Token-level metrics (BERTScore etc.) are not implemented.** The
+  protocol allows 2-D embeddings, but no such metric ships.
 - **Concurrent writers on the SQLite cache.** WAL mode handles
   multiple processes safely. Multiple threads in the same process
   share a single connection (we open it with

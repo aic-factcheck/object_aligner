@@ -1,4 +1,4 @@
-# 9. Schema Reference
+# 🧾 Schema Reference
 
 [Docs](index.md) › Schema Reference
 
@@ -10,7 +10,7 @@ This is a complete reference of all schema keywords recognized by Object Aligner
 
 | Keyword | Type | Default | Applies to | Description |
 |---------|------|---------|------------|-------------|
-| `type` ⚡ | string | *(required)* | all | One of `"string"`, `"integer"`, `"number"`, `"boolean"`, `"array"`, `"object"` |
+| `type` | string | *(required)* | all | One of `"string"`, `"integer"`, `"number"`, `"boolean"`, `"array"`, `"object"` |
 
 All standard JSON Schema validation keywords (e.g., `required`, `additionalProperties`, `minItems`, `maxItems`, `enum`, etc.) are also accepted and used during validation in `metric()`, but they do **not** affect alignment behavior.
 
@@ -141,9 +141,9 @@ downstream surface (`MatchItem.kind == "null"`,
 
 | Keyword | Type | Default | Description |
 |---------|------|---------|-------------|
-| `items` ⚡ | object | — | Schema for variable-length items. Used with `order` and/or after `prefixItems`. |
-| `prefixItems` ⚡ | list[object] | — | Per-position schemas for the fixed-length prefix. Each element is a schema object. |
-| `prefixWeights` ⚡ | list[float] | all `1.0` | Weight for each prefix position. Length must match `prefixItems`. Normalized internally. |
+| `items` | object | — | Schema for variable-length items. Used with `order` and/or after `prefixItems`. |
+| `prefixItems` | list[object] | — | Per-position schemas for the fixed-length prefix. Each element is a schema object. |
+| `prefixWeights` ⚡ | list[float] | all `1.0` | Weight for each prefix position. Should match the length of `prefixItems` (not validated — a mismatched length follows numpy broadcasting at align time: a length-1 list broadcasts across all positions, any other mismatch raises a numpy `ValueError`). Normalized internally. |
 | `order` ⚡ | string | `"fixed"` | Alignment strategy for `items`: `"fixed"` (DP sequence alignment) or `"align"` (Hungarian reordering) |
 | `ignoreExcess` ⚡ | bool | `false` | If true, extra candidate items don't count toward normalization denominator. Mutually exclusive with `ignoreMissing` (both → `ValueError` at construction). |
 | `ignoreMissing` ⚡ | bool | `false` | If true, missing gold items don't count toward normalization denominator. Mutually exclusive with `ignoreExcess`. |
@@ -179,7 +179,7 @@ Uses the Hungarian algorithm (via `scipy.optimize.linear_sum_assignment`):
 
 | Keyword | Type | Default | Description |
 |---------|------|---------|-------------|
-| `properties` ⚡ | object | *(required)* | Mapping from key name → property schema. Each property schema defines the type and scoring for that key's value. |
+| `properties` | object | *(required)* | Mapping from key name → property schema. Each property schema defines the type and scoring for that key's value. |
 | `keyScore` ⚡ | string | `"jaro"` | Key comparison function: `"jaro"` or `"exact"` |
 | `keyThreshold` ⚡ | float | `0.0` | Minimum key similarity to form a pairing; pairs below this are treated as unaligned |
 | `keyImportance` ⚡ | float | `0.0` | Weight of key score in the final dict score. Default `0.0` means keys are *scaffolding*, not data — set to `1` (or higher) when the model also chooses the keys (open-vocabulary extraction, map-as-data dicts). See [`dicts.md`](dicts.md#key-importance) for guidance. |

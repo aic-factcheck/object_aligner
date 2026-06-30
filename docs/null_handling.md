@@ -1,10 +1,9 @@
-# 14. Null Handling
+# 🈳 Null Handling
 
 [Docs](index.md) › Null Handling
 
 Real-world LLM extractors emit `null` whenever the answer is missing or
-unknown. Earlier versions of Object Aligner crashed on `None` values
-because the alignment dispatcher had no branch for them. This chapter
+unknown. This chapter
 describes the **null-aware leaf**: a small dispatch path activated when
 exactly one of `gold` / `pred` is `None`, plus the per-field
 `nullScore` schema keyword that calibrates how harshly the asymmetric
@@ -21,7 +20,7 @@ The rule is simple:
 
 `nullScore` is **symmetric**: the same number governs both
 gold-null-pred-value and gold-value-pred-null. (The 3-state policy that
-distinguishes the two directions is intentionally out of scope for v1.)
+distinguishes the two directions is intentionally out of scope.)
 
 ---
 
@@ -224,17 +223,15 @@ path="/diagnosis", kind="null_value_replace", value="flu", ...)`.
 - **Range.** `nullScore` must be a real number in `[0, 1]`. Booleans
   and non-numeric types are rejected at construction time, as are
   out-of-range floats.
-- **Symmetric for v1.** A single `nullScore` covers both directions
-  (gold-null-pred-value and gold-value-pred-null). The asymmetric
-  variant (separate "hallucination" vs "omission" penalties) is a
-  candidate for a future release.
+- **Symmetric.** A single `nullScore` covers both directions
+  (gold-null-pred-value and gold-value-pred-null).
 - **List-position semantics.** A `None` *item* inside a list — present
   in the data — is **not** the same thing as a *missing* item slot
   produced by an unequal-length pairing. Nullability of items is a
   per-item property; absence is a list-length property handled by
   `ignoreExcess` / `ignoreMissing`.
 - **Skip-validation mode.** Under `skip_validation=True` the schema's
-  `type` is no longer consulted, so the null branch fires for any
+  `type` is not consulted, so the null branch fires for any
   `None` value regardless of the declared types. The same `nullScore`
   rules apply.
 

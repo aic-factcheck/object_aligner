@@ -1,4 +1,4 @@
-# 7. Plain-English Description
+# 🗣️ Plain-English Description
 
 [Docs](index.md) › Plain-English Description
 
@@ -31,7 +31,7 @@ aligner = ObjectAligner(schema)
 
 dr = aligner.describe("hello", "helo")
 print(dr.score)
-# 0.9333333333333333
+# 0.9333333333333332
 print(dr.text)
 # The predicted output scores overall 93%, let us align the predicted output to the gold and analyze the differences:
 # The predicted value "helo" does not match the gold "hello" (score=93%).
@@ -277,7 +277,7 @@ print(aligner_ref.describe(gold, pred).text)
 # (excerpt)
 # ...
 #   KEY = The predicted key "best_friend" exactly matches the gold.
-#   VALUE = The predicted reference "y" does not match the gold reference "p1" under the inferred id mapping (score=0%).
+#   VALUE = The predicted reference "y" should be "x" under the inferred id mapping (score=0%).
 ```
 
 ### Example 7: `style="json"` — structured entries, empty text
@@ -331,7 +331,7 @@ print(strict.metric(
     {"name": "Alice", "age": 30},
     {"name": "Alice"},  # missing age → validation fail
 ))
-# {'score': 0.0, 'description': "JSON Schema validation failed for path=\"/\". Error message: 'age' is a required property."}
+# {'score': 0.0, 'description': "JSON Schema validation failed for path=\"\". Error message: 'age' is a required property."}
 ```
 
 ### Example 9: Customizing a single template
@@ -463,20 +463,38 @@ chapter-specific template-key table that has no natural home there.
 | `describe.intro.imperfect` | `score`, `score_pct` | Overall score is `< 1.0` |
 | `describe.item.match` | `indent`, `gold`, `pred`, `score`, `score_pct` | Primitive leaf, matched |
 | `describe.item.mismatch` | `indent`, `gold`, `pred`, `score`, `score_pct` | Primitive leaf, mismatched |
-| `describe.ref.match` | `indent`, `gold`, `pred`, `score`, `score_pct` | `ref` leaf, matched |
-| `describe.ref.mismatch` | `indent`, `gold`, `pred`, `score`, `score_pct` | `ref` leaf, mismatched |
+| `describe.ref.match` | `indent`, `pred`, `score`, `score_pct` | `ref` leaf, matched |
+| `describe.ref.mismatch` | `indent`, `pred`, `value`, `score`, `score_pct` | `ref` leaf, mismatched (`value` is the pred-space id the reference should point at) |
+| `describe.ref.no_target` | `indent`, `pred`, `score`, `score_pct` | `ref` leaf whose gold referent has no counterpart in the candidate |
 | `describe.id.match` | `indent`, `gold`, `pred`, `score`, `score_pct` | `idScope` leaf, matched (defaults to empty) |
 | `describe.id.mismatch` | `indent`, `gold`, `pred`, `score`, `score_pct` | `idScope` leaf, mismatched (defaults to empty) |
+| `describe.null.match` | `indent`, `gold`, `pred`, `score`, `score_pct` | Null-aware leaf, both sides `None` |
+| `describe.null.mismatch` | `indent`, `gold`, `pred`, `score`, `score_pct` | Null-aware leaf, exactly one side `None` |
 | `describe.list.match` | `indent`, `score`, `score_pct` | List, all children matched |
 | `describe.list.mismatch` | `indent`, `score`, `score_pct` | List, some children mismatched |
 | `describe.list.excess` | `indent`, `gold`, `pred`, `score`, `score_pct` | Candidate list item with no gold counterpart |
 | `describe.list.missing` | `indent`, `gold`, `pred`, `score`, `score_pct` | Gold list item with no candidate counterpart |
+| `describe.list.ambiguous` | `indent`, `confidence`, `confidence_pct`, `n_gold`, `n_pred` | Low-confidence reorder list (opt-in: `include_ambiguous=True`) |
 | `describe.dict.match` | `indent`, `score`, `score_pct` | Dict, all children matched |
 | `describe.dict.mismatch` | `indent`, `score`, `score_pct` | Dict, some children mismatched |
+| `describe.dict.ambiguous` | `indent`, `confidence`, `confidence_pct` | Low-confidence dict-key pairing (opt-in: `include_ambiguous=True`) |
 | `describe.dict.key.match` | `indent`, `gold`, `pred`, `score`, `score_pct` | Dict child, key part matched |
 | `describe.dict.key.mismatch` | `indent`, `gold`, `pred`, `score`, `score_pct` | Dict child, key part mismatched |
 | `describe.dict.value.prefix` | `indent` | Emitted before each dict child's value row |
 | `describe.validation_error` | `path`, `message` | `pred` failed schema validation |
+
+In addition to the placeholders listed above, every per-node key
+(`describe.item.*`, `describe.ref.*`, `describe.id.*`, `describe.null.*`,
+`describe.list.match`/`mismatch`/`excess`/`missing`, `describe.dict.match`/`mismatch`,
+and `describe.dict.key.*`) also accepts `confidence`, `confidence_pct`, and
+`confidence_suffix`, so overrides may reference the per-node confidence.
+
+The two `*.ambiguous` keys are emitted only when `describe()` is called with
+`include_ambiguous=True` and the node's `confidence` falls below
+`ambiguity_threshold` (default `0.30`); the `(confidence …)` suffix on other
+lines is controlled by `show_confidence=True`. Both flags require
+`compute_confidence=True` on the `ObjectAligner` and default off. See
+[`confidence.md`](confidence.md).
 
 The template-key allowlist and per-key placeholder set live in
 `_DESCRIPTION_PLACEHOLDERS` in `src/object_aligner/describe.py` and are
@@ -512,22 +530,6 @@ deterministic.
 In the defaults so that `id` fields don't pollute prose with
 bookkeeping noise. If your use case wants id rows visible, override
 those two keys.
-
-### Stability across versions
-
-These fields are part of the **stable API** and won't change shape
-without a major version bump:
-
-- `DescriptionEntry`: `path`, `depth`, `match_kind`, `outcome`,
-  `score`, `text`.
-- `DescriptionResult`: `score`, `text`, `entries`, `style`.
-- Template key set: keys may be **added** (with sensible English
-  defaults) but not renamed or removed.
-
-The wording inside `DescriptionResult.text` (and inside individual
-`DescriptionEntry.text` values) may evolve between minor versions as
-the English defaults are tuned. If you depend on exact strings,
-override the relevant templates.
 
 ---
 

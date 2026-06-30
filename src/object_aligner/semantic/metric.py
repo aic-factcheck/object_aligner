@@ -6,11 +6,9 @@ Layer 3 of the semantic stack: turns an
 :class:`object_aligner.ObjectAligner`'s
 ``custom_metrics={"string": {...}}`` registry.
 
-v1 ships one metric — cosine similarity between sentence-level
+Ships one metric — cosine similarity between sentence-level
 embeddings, with a choice of sign convention for the
-``[-1, 1] → [0, 1]`` rescaling. Future metrics (BERTScore, dot product
-with no normalisation, asymmetric retrieval, ...) will live in this
-module alongside.
+``[-1, 1] → [0, 1]`` rescaling.
 """
 
 from __future__ import annotations

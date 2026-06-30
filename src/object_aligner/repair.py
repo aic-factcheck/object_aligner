@@ -5,7 +5,7 @@ a RFC 6902-flavored ``add`` / ``remove`` / ``replace`` carrying an estimated
 ``score_delta`` in :math:`[0, 1-S]` that says how much of the score deficit
 the op would close.
 
-v1 is the **approximate** flavor: ``score_delta`` is read from the same per-
+This is the **approximate** flavor: ``score_delta`` is read from the same per-
 aggregator alpha schedules that drive ``tree_walk_attribution`` in
 ``attribution.py``.
 
@@ -54,8 +54,8 @@ class RepairOp:
     Attributes:
         op: One of `"add"` / `"remove"` / `"replace"`.
         path: RFC 6901 JSON Pointer locating the patch site.
-        score_delta: Positive — how much of the deficit `1 - S` applying
-            this op would close (approximate, v1).
+        score_delta: Positive — how much of the deficit `1 - s` applying
+            this op would close (approximate).
         kind: Finer discriminator (`primitive_replace`, `key_add`,
             `list_item_missing`, `ref_fix`, `ref_fix_no_target`,
             `null_value_replace`, `pairing_ambiguous`, etc.).
@@ -163,7 +163,7 @@ def generate_repairs(
 ) -> RepairResult:
     """Generate a ranked list of scored repair ops for a match tree.
 
-    Approximate flavor (v1): score deltas come from the same tree-walk
+    Approximate flavor: score deltas come from the same tree-walk
     math as `tree_walk_attribution`.
 
     Args:
@@ -187,8 +187,7 @@ def generate_repairs(
             `"expected_gain"` (descending by `score_delta × confidence`),
             or `"confidence"` (descending by stability of the originating
             pairing). All three modes use the same deterministic
-            tiebreaker `(path, op, kind)`. Default preserves byte-for-
-            byte behavior of pre-confidence releases.
+            tiebreaker `(path, op, kind)`.
         include_pairing_ambiguous: If `True`, walk the match tree for
             Hungarian-paired containers whose `confidence` falls below
             `ambiguity_threshold` and append a `pairing_ambiguous` op

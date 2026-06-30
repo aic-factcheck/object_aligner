@@ -1,10 +1,10 @@
-# 9. Per-Property Score Attribution
+# 🎯 Per-Property Score Attribution
 
 [Docs](index.md) › Per-Property Score Attribution
 
 `metric()` and `align()` answer *how well* a candidate matches the gold. **`attribute()`** answers a different question: *where exactly is the deficit, and how big is each piece?*
 
-Given the same `(gold, pred)` you'd feed into `metric()`, `attribute()` returns a ranked, path-keyed decomposition of $1 - S$ — one entry per schema-relevant location, sorted by how much of the deficit lives there.
+Given the same `(gold, pred)` you'd feed into `metric()`, `attribute()` returns a ranked, path-keyed decomposition of $1 - \mathrm{s}$ — one entry per schema-relevant location, sorted by how much of the deficit lives there.
 
 This is the deterministic, no-LLM-judge backbone for:
 
@@ -63,7 +63,7 @@ score = 0.6708  deficit = 0.3292
 
 ## The formula
 
-Every internal node in the match tree writes its score as a convex combination of its children's scores under the chosen Hungarian/DP assignment $\sigma^\star$:
+Every internal node in the match tree writes its score as a convex combination of its children's scores under the chosen Hungarian/DP assignment $\pi^\star$:
 
 $$
 s_v \;=\; \sum_{u \in \mathrm{children}(v)} \alpha_{v,u}\, s_u,
@@ -80,7 +80,7 @@ The leaf's contribution to the deficit is $c_L \cdot (1 - s_L)$, and these contr
 
 $$
 \boxed{\;
-1 - S \;=\; \sum_{L \,\in\, \mathrm{leaves}(T)} c_L\,(1 - s_L)
+1 - \mathrm{s} \;=\; \sum_{L \,\in\, \mathrm{leaves}(T)} c_L\,(1 - s_L)
 \;}
 $$
 
@@ -313,7 +313,7 @@ score = 0.4792   deficit = 0.5208
   /2                     score=1.000  weight=0.250  contrib=0.0000
 ```
 
-`prefixImportance / restImportance = 1 / 3` means the rest block carries $\bar{\rho} = 0.75$ of the total mass, the prefix block carries $\bar{\pi} = 0.25$. Each prefix child gets $0.25 \cdot 0.5 = 0.125$; each rest child gets $0.75 / 2 = 0.375$ — but `exact` on `"tag3" vs "tag2"` scores 0 *and* the aggregator splits that zero-cell into two unmatched leaves (`/3` for gold-side, `/4` for pred-side), each carrying $c = 0.250$.
+`prefixImportance / restImportance = 1 / 3` means the rest block carries $\bar{w}_r = 0.75$ of the total mass, the prefix block carries $\bar{w}_p = 0.25$. Each prefix child gets $0.25 \cdot 0.5 = 0.125$; each rest child gets $0.75 / 2 = 0.375$ — but `exact` on `"tag3" vs "tag2"` scores 0 *and* the aggregator splits that zero-cell into two unmatched leaves (`/3` for gold-side, `/4` for pred-side), each carrying $c = 0.250$.
 
 ### Example 9 — Nested movie schema (the canonical worked example)
 
@@ -358,7 +358,7 @@ gold = {"events": [
 ]}
 pred = {"events": [
     {"kind": "win",  "actor": "Alise", "year": 2020},   # nearly right
-    {"kind": "tie",  "actor": "X",     "year": 9999},   # very wrong
+    {"kind": "loss", "actor": "X",     "year": 9999},   # mostly wrong (only the kind matches)
 ]}
 aligner = ObjectAligner(schema)
 ```
@@ -371,12 +371,13 @@ show(r)
 ```
 
 ```
-score = 0.8694   deficit = 0.1306
-  /events/1/kind         score=0.000  weight=0.042  contrib=0.0417
-  /events/1/actor        score=0.000  weight=0.042  contrib=0.0417
-  /events/1/year         score=0.000  weight=0.042  contrib=0.0417
-  /events/0/actor        score=0.867  weight=0.042  contrib=0.0056
-  ...                    (9 more entries with contrib = 0.0000)
+score = 0.6444   deficit = 0.3556
+  /events/1/actor        score=0.000  weight=0.167  contrib=0.1667
+  /events/1/year         score=0.000  weight=0.167  contrib=0.1667
+  /events/0/actor        score=0.867  weight=0.167  contrib=0.0222
+  /events/0/kind         score=1.000  weight=0.167  contrib=0.0000
+  /events/0/year         score=1.000  weight=0.167  contrib=0.0000
+  /events/1/kind         score=1.000  weight=0.167  contrib=0.0000
 ```
 
 **Subtree granularity** — pick the right level of abstraction first:
@@ -387,16 +388,16 @@ show(r)
 ```
 
 ```
-score = 0.8694   deficit = 0.1306
-  (root)                 score=0.869  weight=1.000  contrib=0.1306  [subtree dict]
-  /events                score=0.739  weight=0.500  contrib=0.1306  [subtree list:reorder]
-  /events/1              score=0.500  weight=0.250  contrib=0.1250  [subtree dict]
-  /events/0              score=0.978  weight=0.250  contrib=0.0056  [subtree dict]
+score = 0.6444   deficit = 0.3556   residual = +0.7111
+  (root)                 score=0.644  weight=1.000  contrib=0.3556  [subtree dict]
+  /events                score=0.644  weight=1.000  contrib=0.3556  [subtree list:reorder]
+  /events/1              score=0.333  weight=0.500  contrib=0.3333  [subtree dict]
+  /events/0              score=0.956  weight=0.500  contrib=0.0222  [subtree dict]
 ```
 
-Reading top-down: 100 % of the deficit lives under `/events`; within that, 95 % is concentrated in event index 1. *Fix event 1.* From there you can re-run with `granularity="leaf"` to see which field of event 1 hurts most.
+Reading top-down: 100 % of the deficit lives under `/events`; within that, ~94 % is concentrated in event index 1. *Fix event 1.* From there you can re-run with `granularity="leaf"` to see which field of event 1 hurts most. (The `residual` in the header is the expected by-product of subtree mode — the nested entries are not additive; see the note below.)
 
-> **Subtree entries are nested — do not sum across them.** The root's `0.1306` and `/events`'s `0.1306` aren't additive; one *contains* the other. `total_contribution` over subtree entries is **not** the deficit; the `residual` value on the result reflects that.
+> **Subtree entries are nested — do not sum across them.** The root's `0.3556` and `/events`'s `0.3556` aren't additive; one *contains* the other. `total_contribution` over subtree entries is **not** the deficit; the `residual` value on the result reflects that.
 
 ### Example 11 — Threshold clipping
 
@@ -429,6 +430,10 @@ schema = {
         "relations": {"type": "array", "order": "align",
             "items": {"type": "object", "keyScore": "exact",
                 "properties": {
+                    # A matching scalar (the edge label) so the reorder
+                    # Hungarian pairs the relation with its gold counterpart;
+                    # the swapped refs then surface as [ref] leaves.
+                    "label":  {"type": "string", "score": "exact"},
                     "source": {"type": "integer", "ref": "person"},
                     "target": {"type": "integer", "ref": "person"},
                 }}},
@@ -436,30 +441,36 @@ schema = {
 }
 gold = {
     "people":    [{"id": 1, "name": "Alice"}, {"id": 2, "name": "Bob"}],
-    "relations": [{"source": 1, "target": 2}],
+    "relations": [{"label": "knows", "source": 1, "target": 2}],
 }
 pred = {  # ids are arbitrary; relation source/target swapped
     "people":    [{"id": 53, "name": "Alice"}, {"id": 124, "name": "Bob"}],
-    "relations": [{"source": 124, "target": 53}],
+    "relations": [{"label": "knows", "source": 124, "target": 53}],
 }
 r = ObjectAligner(schema).attribute(gold, pred)
 show(r)
 ```
 
 ```
-score = 0.8750   deficit = 0.1250
-  /relations/0/source    score=0.000  weight=0.062  contrib=0.0625  [ref]
-  /relations/0/target    score=0.000  weight=0.062  contrib=0.0625  [ref]
-  /people                score=1.000  weight=0.250  contrib=0.0000  [key]
-  /people/0/id           score=1.000  weight=0.031  contrib=0.0000  [key]
-  /people/0/id           score=1.000  weight=0.031  contrib=0.0000  [id]
-  ...                    (9 more zero-contribution entries)
+score = 0.6667   deficit = 0.3333
+  /relations/0/source    score=0.000  weight=0.167  contrib=0.1667  [ref]
+  /relations/0/target    score=0.000  weight=0.167  contrib=0.1667  [ref]
+  /people/0/id           score=1.000  weight=0.125  contrib=0.0000  [id]
+  /people/0/name         score=1.000  weight=0.125  contrib=0.0000
+  /people/1/id           score=1.000  weight=0.125  contrib=0.0000  [id]
+  /people/1/name         score=1.000  weight=0.125  contrib=0.0000
+  /relations/0/label     score=1.000  weight=0.167  contrib=0.0000
 ```
 
 - `[id]` leaves always score 1 — they contribute nothing.
 - `[ref]` leaves score 0 or 1 based on the derived bijection. The swapped source/target each carry a full $c_L$ of deficit.
 
-### Example 13 — Filtering dual-None positions
+### Example 13 — Vacuous dual-None positions
+
+A `prefixItems` position that is **absent on both sides** (gold and pred both
+ran out before reaching it) is *vacuous*: it carries **zero weight** and is
+excluded from the normalization denominator. This keeps the identity
+`metric(g, g) == 1` for lists shorter than `prefixItems`.
 
 ```python
 schema = {
@@ -470,7 +481,7 @@ schema = {
         {"type": "string"},
     ],
 }
-# Both gold and pred run out at index 2 → dual-None sentinel emitted by the aggregator.
+# Both gold and pred stop at index 2 → position /2 is absent on both sides.
 r = ObjectAligner(schema).attribute(["a", "b"], ["a", "b"])
 show(r)
 ```
@@ -478,14 +489,17 @@ show(r)
 Default (`include_empty_positions=False`):
 
 ```
-score = 0.6667   deficit = 0.3333   residual = -0.3333
-  /0                     score=1.000  weight=0.333  contrib=0.0000
-  /1                     score=1.000  weight=0.333  contrib=0.0000
+score = 1.0000   deficit = 0.0000
+  /0                     score=1.000  weight=0.500  contrib=0.0000
+  /1                     score=1.000  weight=0.500  contrib=0.0000
 ```
 
-The dual-None at `/2` is filtered. The entries-sum no longer equals the deficit — the gap is surfaced as `residual` (the helper prints it whenever it's non-trivial).
+The two present positions are perfect and the missing third position is not
+penalized — the list scores a perfect `1.0`. The both-absent sentinel at `/2`
+is filtered out entirely.
 
-With `include_empty_positions=True`:
+With `include_empty_positions=True` the sentinel reappears, but at **zero
+weight** (`[absent]` marker) so it still contributes nothing:
 
 ```python
 r = ObjectAligner(schema).attribute(["a", "b"], ["a", "b"], include_empty_positions=True)
@@ -493,13 +507,14 @@ show(r)
 ```
 
 ```
-score = 0.6667   deficit = 0.3333
-  /2                     score=0.000  weight=0.333  contrib=0.3333
-  /0                     score=1.000  weight=0.333  contrib=0.0000
-  /1                     score=1.000  weight=0.333  contrib=0.0000
+score = 1.0000   deficit = 0.0000
+  /0                     score=1.000  weight=0.500  contrib=0.0000
+  /1                     score=1.000  weight=0.500  contrib=0.0000
+  /2                     score=0.000  weight=0.000  contrib=0.0000  [absent]
 ```
 
-The sentinel reappears and the invariant is exact to float precision.
+`include_empty_positions=True` is purely for inspection — it never changes the
+score or introduces deficit, because the sentinel's weight is `0`.
 
 ---
 
@@ -523,7 +538,7 @@ chapter-specific tables (granularity modes) that have no natural home there.
 
 | Mode | Emits | Sum invariant |
 |---|---|---|
-| `"leaf"` *(default)* | every primitive leaf; key leaves; synthetic leaves at non-decomposable nodes | $\sum_L \mathrm{contrib} = 1 - S$ (within float precision; up to filtered sentinels) |
+| `"leaf"` *(default)* | every primitive leaf; key leaves; synthetic leaves at non-decomposable nodes | $\sum_L \mathrm{contrib} = 1 - \mathrm{s}$ (within float precision; up to filtered sentinels) |
 | `"subtree"` | every internal node | **No** — entries are nested; treat each as a stand-alone "deficit attributable to this subtree." |
 | `"all"` | leaves *and* internals | No — same caveat as `"subtree"`. The `is_leaf` field on each entry separates the two. |
 
@@ -533,7 +548,7 @@ chapter-specific tables (granularity modes) that have no natural home there.
 
 ### The fixed-assignment view
 
-Tree-walk attribution is **exact** under the assignment $\sigma^\star$ that `align()` actually chose. It is a true decomposition of the deficit you observe — never an estimate.
+Tree-walk attribution is **exact** under the assignment $\pi^\star$ that `align()` actually chose. It is a true decomposition of the deficit you observe — never an estimate.
 
 What it *cannot* see: if a perturbation flipped the Hungarian's optimal pairing on a `order: "align"` list, or re-routed a DP traceback on a `order: "fixed"` list, the alignment would change and the tree-walk weights $c_L$ would be different. Wherever a discrete optimizer (Hungarian over list items, DP traceback, dict-key Hungarian, scope bijection) sits above a leaf, tree-walk is a *first-order linearization* of what a real perturbation would do.
 

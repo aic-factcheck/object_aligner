@@ -58,7 +58,7 @@ DEFAULT_DESCRIPTION_TEMPLATES = _load_packaged_template("describe.toml")
 
 # Optional confidence placeholders. Available on every per-node template
 # key — user-supplied overrides may include them; the shipped defaults do
-# not so byte-identical output is preserved when `show_confidence=False`.
+# not, so confidence is omitted from output when `show_confidence=False`.
 _CONFIDENCE_PLACEHOLDERS = frozenset({"confidence", "confidence_pct", "confidence_suffix"})
 
 
@@ -284,7 +284,7 @@ def _dict_child_path(parent_path: str, key: Any) -> str:
 def _confidence_suffix(confidence: float, show: bool) -> str:
     """Banded suffix string for the optional ``{confidence_suffix}`` placeholder.
 
-    Emits ``""`` when off (preserving byte-identical output) or when the
+    Emits ``""`` when off or when the
     confidence is high (``>= 0.70``). Otherwise emits a parenthetical
     tag that escalates phrasing as confidence drops.
     """
@@ -363,7 +363,7 @@ def _walk(
             confidence_suffix=_confidence_suffix(aligned.confidence, show_confidence),
         )
         # If the template did not consume {confidence_suffix}, inject the
-        # banded suffix here (preserves byte-identical output when off).
+        # banded suffix here (emits nothing when off).
         if "{confidence_suffix}" not in templates[template_key]:
             text = _apply_suffix(text, _confidence_suffix(aligned.confidence, show_confidence))
         entries.append(DescriptionEntry(
@@ -616,7 +616,7 @@ def render_description(
         show_confidence: If ``True``, append a banded confidence suffix
             (e.g. ``" (low confidence 0.23)"``) to every per-node line
             whose confidence falls below ``0.70``. Default ``False``
-            preserves byte-identical output of pre-confidence releases.
+            omits the suffix.
         include_ambiguous: If ``True``, emit a dedicated
             ``describe.list.ambiguous`` / ``describe.dict.ambiguous``
             entry before walking any Hungarian-paired container whose

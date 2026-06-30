@@ -1,4 +1,4 @@
-# 6. The Metric Function
+# 📊 The Metric Function
 
 [Docs](index.md) › The Metric Function
 
@@ -60,7 +60,8 @@ every template key, and worked examples, is
 ## Schema validation
 
 Before alignment, `metric()` validates **both** `gold` and `pred` against the
-schema using `jsonschema.validate`:
+schema. Validation uses a `jsonschema` validator instance built once at
+construction and reused on every call:
 
 1. **Gold must pass validation** — if it doesn't, a `ValidationError` is raised.
 2. **If pred fails validation** — the function catches the `ValidationError`
@@ -173,7 +174,7 @@ optionally a built-in description.
 - [`feedback.md`](feedback.md) — `metric(generate_feedback=...)` and the
   prescriptive feedback string for prompt-optimizer reflection slots.
 - [`attribution.md`](attribution.md) — per-path decomposition of the deficit
-  $1 - S$.
+  $1 - \mathrm{s}$.
 - [`api.md`](api.md) — generated API reference for `ObjectAligner.metric`.
 
 [← Documentation home](index.md)

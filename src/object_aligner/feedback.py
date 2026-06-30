@@ -83,7 +83,7 @@ _COMPACT_OVERRIDES = _load_packaged_template("feedback.compact.toml")
 
 # Optional confidence placeholders. Available on every per-op template
 # key — user-supplied overrides may include them; the shipped defaults do
-# not so byte-identical output is preserved when compute_confidence=False.
+# not, so confidence is omitted from output when compute_confidence=False.
 _CONFIDENCE_PLACEHOLDERS = frozenset({"confidence", "confidence_pct"})
 
 
@@ -698,8 +698,7 @@ def render_feedback(
             section. Set to `False` to suppress the section even when
             such ops are present.
         referential_feedback: `"literal"` (default) renders `ref_fix` /
-            `ref_fix_no_target` ops by opaque ids — byte-identical to
-            earlier releases. `"semantic"` renders them by the gold
+            `ref_fix_no_target` ops by opaque ids. `"semantic"` renders them by the gold
             endpoint's discriminative properties and the relation label,
             using `ref_endpoints`. Falls back to the literal line per-op
             when no descriptor / discriminator is available.

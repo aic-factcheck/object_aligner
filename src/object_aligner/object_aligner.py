@@ -157,8 +157,7 @@ class ObjectAligner(
                 shape.
             referential_feedback: How `feedback()` renders `ref` /
                 `idScope` mismatches. `"literal"` (default) uses opaque
-                ids and is byte-identical to earlier releases.
-                `"semantic"` instead describes the gold endpoint node the
+                ids. `"semantic"` instead describes the gold endpoint node the
                 reference should connect to by its discriminative
                 properties and the relation label — a transferable lesson
                 for prompt optimizers. Only `feedback().text` changes;
@@ -175,10 +174,9 @@ class ObjectAligner(
                 on `MatchItem` / `MatchList` / `MatchDict` from the
                 similarity matrix used at each Hungarian site
                 (`order: "align"` lists and dict-key matching). Default
-                `False` keeps `confidence == 1.0` everywhere, which
-                preserves byte-identical output for `feedback()` and
-                `describe()` under default flags. See
-                [`docs/confidence.md`](../confidence.md).
+                `False` keeps `confidence == 1.0` everywhere, so
+                `feedback()` and `describe()` omit confidence from their
+                output. See [`docs/confidence.md`](../confidence.md).
             confidence_method: `"margin"` (default) or `"entropy"`. Selects
                 the per-pair confidence formula. Margin is a fast linear
                 pass over the similarity matrix; entropy softmaxes each
@@ -193,8 +191,8 @@ class ObjectAligner(
                 runs Weisfeiler–Leman color refinement over the same-scope
                 ref graph, computed independently per side, so structurally
                 distinct definers align by structure rather than emission
-                order. `"none"` reproduces the pre-WL behavior exactly
-                (property-only cost plus an arbitrary tie-break). See
+                order. `"none"` uses property-only cost with an arbitrary
+                tie-break (no structural refinement). See
                 [`docs/referential.md`](../referential.md).
             wl_integration: How the structural color enters the cost matrix
                 when `id_disambiguation="wl"`. `"tie_break"` (default) lets
@@ -316,7 +314,7 @@ class ObjectAligner(
         self._validator = validator_for(schema)(schema)
 
 
-    def align(self, g, p, skip_validation=False):
+    def align(self, gold, pred, skip_validation=False):
         """Align gold to candidate and return the match tree.
 
         Builds a per-call context, so concurrent calls on the same
@@ -324,9 +322,9 @@ class ObjectAligner(
         [`docs/concepts.md`](../concepts.md) for the algorithmic flow.
 
         Args:
-            g: Gold (reference) object. Must match the schema unless
+            gold: Gold (reference) object. Must match the schema unless
                 `skip_validation=True`.
-            p: Candidate object (the predicted output). Must match the schema
+            pred: Candidate object (the predicted output). Must match the schema
                 unless `skip_validation=True`.
             skip_validation: If `True`, skip JSON Schema validation of both
                 inputs (caller is responsible for ensuring well-formedness).
@@ -339,11 +337,11 @@ class ObjectAligner(
         Raises:
             jsonschema.ValidationError: If validation is enabled and either
                 input fails.
-            TypeError: If `g` and `p` are not of the same top-level Python
+            TypeError: If `gold` and `pred` are not of the same top-level Python
                 type. Nested dict values whose Python types differ do not
                 raise — they score `0.0` in place, matching `metric()`.
         """
-        match, _ = self._align_with_ctx(g, p, skip_validation=skip_validation)
+        match, _ = self._align_with_ctx(gold, pred, skip_validation=skip_validation)
         return match
 
     def _align_with_ctx(self, g, p, *, skip_validation=False):
@@ -466,8 +464,8 @@ class ObjectAligner(
         """Emit a ranked list of scored repair ops for `(gold, pred)`.
 
         Each `RepairOp` carries an estimated `score_delta` — how much of the
-        deficit `1 - S` applying the op would close. v1 implements the
-        *approximate* flavor only; deltas come from the tree-walk math.
+        deficit `1 - s` applying the op would close. Implements the
+        *approximate* flavor: deltas come from the tree-walk math.
         See [`docs/repair.md`](../repair.md) for examples.
 
         Args:
@@ -619,8 +617,6 @@ class ObjectAligner(
             skip_validation: If `True`, skip JSON Schema validation.
             rank_by: `"score_delta"` (default), `"expected_gain"`, or
                 `"confidence"`. See [`docs/confidence.md`](../confidence.md).
-                Default preserves byte-identical output of earlier
-                releases.
             include_pairing_ambiguous: If `True`, surface a "Diagnostic
                 notes" trailing section listing Hungarian containers
                 whose `confidence` fell below `ambiguity_threshold`.
@@ -797,8 +793,7 @@ class ObjectAligner(
             show_confidence: If `True`, append a banded confidence
                 suffix to every per-node line whose `confidence` falls
                 below `0.70`. Requires the owning aligner to have been
-                constructed with `compute_confidence=True`. Default
-                preserves byte-identical output of earlier releases.
+                constructed with `compute_confidence=True`.
                 See [`docs/confidence.md`](../confidence.md).
             include_ambiguous: If `True`, emit an extra entry above
                 every Hungarian-paired container whose `confidence`
