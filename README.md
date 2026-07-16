@@ -17,6 +17,11 @@
   <a href="docs/index.md"><img alt="Docs" src="https://img.shields.io/badge/docs-read%20the%20guide-blueviolet" /></a>
 </p>
 
+> [!NOTE]
+> **Paper:** Object Aligner is described in [arXiv:2607.01972](https://arxiv.org/abs/2607.01972),
+> currently **under review at IEEE Access**. If you use OA in academic work, please
+> [cite it](#-citation).
+
 LLMs are increasingly asked to emit **JSON conforming to a fixed schema** — for information
 extraction, tool calling, agentic planning, and knowledge-graph construction. Measuring how
 close such an output is to a gold reference is awkward: exact match is brittle, text
@@ -240,15 +245,20 @@ dicts, nesting, referential alignment, feedback, repair, attribution, and edge c
 
 ## 📜 Citation
 
-If you use Object Aligner in academic work, please cite the paper (in preparation):
+If you use Object Aligner in academic work, please cite the paper
+([arXiv:2607.01972](https://arxiv.org/abs/2607.01972), under review at IEEE Access):
 
 ```bibtex
-@misc{drchal2026objectaligner,
-  title  = {Object Aligner: A Configurable JSON Schema Similarity Score for Graphs,
-            Applied to LLM Prompt Optimization},
-  author = {Drchal, Jan},
-  year   = {2026},
-  note   = {Reference implementation: https://github.com/aic-factcheck/object_aligner}
+@article{drchal2026objectaligner,
+  title   = {Object Aligner: A Configurable JSON Schema Similarity Score for Graphs,
+             Applied to LLM Prompt Optimization},
+  author  = {Drchal, Jan},
+  year    = {2026},
+  eprint  = {2607.01972},
+  archivePrefix = {arXiv},
+  primaryClass  = {cs.CL},
+  note    = {Under review at IEEE Access. Reference implementation:
+             https://github.com/aic-factcheck/object_aligner}
 }
 ```
 
