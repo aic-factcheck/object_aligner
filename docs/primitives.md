@@ -246,6 +246,73 @@ This same mechanism is what the embedding-backed semantic-similarity metric uses
 
 ---
 
+## Context-aware custom metrics
+
+The comparators above see only the two leaf values, `(gold, pred)`. Some fields
+can't be judged in that isolation: their correctness depends on a **sibling
+field** or on a value **elsewhere in the object**. A classic case is a field
+whose gold value is only *one* of many correct answers — a locator string that
+must resolve, against a document held at the root and a sibling `span`, to the
+same position gold resolves to. Any string with that property is fully correct,
+so a text comparison is the wrong tool.
+
+For these, a metric can opt in to a three-argument signature
+`(gold, pred, context) -> float`. Mark it with the
+[`context_metric`](api.md#context_metric) decorator (which sets
+`wants_context = True`); the aligner then passes a
+[`ScoreContext`](api.md#scorecontext) as the third argument:
+
+| attribute | what it holds |
+|---|---|
+| `gold_parent` / `pred_parent` | the container (dict/list) immediately enclosing this leaf — a sibling field is `pred_parent["sibling"]` |
+| `gold_root` / `pred_root` | the objects passed to `metric()` / `align()` — reach an absolute field at any depth |
+| `path` | tuple of keys/indices from the gold root to this leaf |
+
+```python
+from object_aligner import ObjectAligner, ScoreContext, context_metric
+
+
+@context_metric
+def context_resolves_same(gold, pred, ctx: ScoreContext) -> float:
+    # `ctx.pred_parent["span"]` is the sibling of this leaf; `ctx.pred_root`
+    # is the whole object being scored.
+    g = resolve(ctx.gold_root["text"], ctx.gold_parent["span"], gold)
+    p = resolve(ctx.pred_root["text"], ctx.pred_parent["span"], pred)
+    return 1.0 if (p is not None and p == g) else 0.0
+
+
+schema = {
+    "type": "object",
+    "properties": {
+        "text": {"type": "string", "score": "exact", "valueWeight": 0.0},
+        "span": {"type": "string", "score": "exact"},
+        "context": {"type": "string", "score": "context_resolves_same"},
+    },
+}
+aligner = ObjectAligner(
+    schema,
+    custom_metrics={"string": {"context_resolves_same": context_resolves_same}},
+)
+```
+
+> **`ScoreContext` is a read-only view.** `gold_parent` / `pred_parent` /
+> `gold_root` / `pred_root` are the live objects, not copies — do **not** mutate
+> them. The same metric runs many times over the same objects while a list is
+> matched, so a mutation would make the result depend on evaluation order and
+> break determinism.
+
+> **`path` is gold-side.** Under `order: "align"` lists, fixed-order skips, or
+> fuzzy key matching, the paired pred element may sit at a different index or
+> key. The path reflects the gold side; the paired pred value is always the
+> `pred` argument, and pred siblings come from `pred_parent`.
+
+Plain `(gold, pred)` metrics are unaffected — they are called exactly as before.
+This works for `string`, `number`, and `integer` custom metrics (booleans are
+exact-only). Attribution, repair, feedback, and describe treat a context-aware
+field as an ordinary leaf.
+
+---
+
 ## See also
 
 - [`lists.md`](lists.md) — composing primitives into arrays.

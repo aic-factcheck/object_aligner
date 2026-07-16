@@ -133,7 +133,14 @@ class ObjectAligner(
                 schemas use built-in number metrics and fall back to custom
                 `number` metrics unless overridden by a custom `integer`
                 metric with the same name. Boolean scoring is exact-only
-                and cannot be customized.
+                and cannot be customized. A metric that also needs a
+                sibling field or a value at the root of the object can opt
+                in to the richer signature
+                `callable(gold, pred, context) -> float` by carrying
+                `wants_context = True` (set it with the `context_metric`
+                decorator); `context` is a `ScoreContext` exposing
+                `gold_parent` / `pred_parent` / `gold_root` / `pred_root` /
+                `path`. See [`docs/primitives.md`](../primitives.md).
             generate_description: Default for the `generate_description`
                 parameter of `metric()`. When truthy, `metric()` returns
                 include a `"description"` key. Accepts `True` / `False` /
@@ -361,6 +368,12 @@ class ObjectAligner(
             confidence_method=self._confidence_method,
             confidence_temperature=self._confidence_temperature,
         )
+        # Roots are constant for the whole call; stash them on ctx so a
+        # context-aware leaf metric can reach an absolute field regardless
+        # of nesting depth. Set before id-mapping derivation so metrics
+        # firing there (scope-definer cost matrix) see them too.
+        ctx.gold_root = g
+        ctx.pred_root = p
         if self._id_scopes:
             ctx.gold_ids = self._validate_referential(g)
             ctx.pred_ids = self._collect_pred_ids(p)

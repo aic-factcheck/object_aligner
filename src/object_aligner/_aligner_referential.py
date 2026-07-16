@@ -272,6 +272,14 @@ class _ReferentialMixin:
         if n == 0 and m == 0:
             return {}, set()
 
+        # Parent handles for context-aware leaf metrics on definer items.
+        # A metric that dereferenced a None parent here would raise, be
+        # swallowed by the except below, and silently corrupt the
+        # bijection (cost 0.0) — so pass the definer item lists as the
+        # enclosing parents and the item's data path.
+        gold_item_list = [it for it, _ in gold_items]
+        pred_item_list = [it for it, _ in pred_items]
+
         d = max(n, m)
         cost = np.zeros((d, d))
         for i in range(n):
@@ -279,7 +287,11 @@ class _ReferentialMixin:
                 g_item = gold_items[i][0]
                 p_item = pred_items[j][0]
                 try:
-                    aligned = self._align_helper(g_item, p_item, item_schema, ctx)
+                    aligned = self._align_helper(
+                        g_item, p_item, item_schema, ctx,
+                        gold_parent=gold_item_list, pred_parent=pred_item_list,
+                        path=gold_items[i][1],
+                    )
                     cost[i][j] = aligned["match"].score
                 except (TypeError, ValueError, KeyError):
                     cost[i][j] = 0.0

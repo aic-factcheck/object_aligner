@@ -2,8 +2,9 @@
 
 The built-in string and number metric callables, their name-to-callable
 registries (:data:`BUILTIN_STRING_METRICS`, :data:`BUILTIN_NUMBER_METRICS`),
-and the ``path2str`` / ``_schema_allows_type`` helpers used across the aligner.
-Pure functions with no project-internal dependencies.
+the public :func:`context_metric` decorator (marks a custom metric as
+context-aware), and the ``path2str`` / ``_schema_allows_type`` helpers used
+across the aligner. Pure functions with no project-internal dependencies.
 """
 from rapidfuzz.distance import DamerauLevenshtein, Indel, Jaro, JaroWinkler, LCSseq, Levenshtein, OSA
 
@@ -91,3 +92,34 @@ BUILTIN_NUMBER_METRICS = {
     "relative": similarity_num_relative,
 }
 SUPPORTED_CUSTOM_METRIC_TYPES = frozenset({"string", "number", "integer"})
+
+
+def context_metric(fn):
+    """Mark a custom metric as context-aware and return it unchanged.
+
+    A plain custom metric is called ``fn(gold, pred)``. Decorating it with
+    ``@context_metric`` sets ``fn.wants_context = True``, which tells
+    `ObjectAligner` to call it as ``fn(gold, pred, context)`` instead,
+    where ``context`` is a
+    [`ScoreContext`][object_aligner.ScoreContext] exposing the enclosing
+    parent objects and the aligned roots. Use it when a leaf's correctness
+    depends on a sibling field or on a value elsewhere in the object.
+
+    The decorator mutates the callable in place and returns the same
+    object, so any other attributes it carries (for example the ``.cache``
+    attached by the semantic metrics) are preserved. Because it assigns an
+    attribute, it works on any callable that accepts attribute assignment —
+    plain functions, lambdas, `functools.partial`, and instances of
+    callable classes all do. The rare exception is a C-level builtin (e.g.
+    ``str.upper``), which cannot hold attributes; wrap it in a plain
+    function first.
+
+    Args:
+        fn: The custom metric callable, with signature
+            ``(gold, pred, context) -> float in [0, 1]``.
+
+    Returns:
+        The same callable, now carrying ``wants_context = True``.
+    """
+    fn.wants_context = True
+    return fn

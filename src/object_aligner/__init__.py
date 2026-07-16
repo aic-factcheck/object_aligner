@@ -7,6 +7,8 @@ from object_aligner._templates import load_templates_from_toml
 # entered while attribution/repair/etc. are mid-load, producing a circular
 # ImportError. Keep this ordering.
 from object_aligner.object_aligner import MatchDict, MatchItem, MatchList, ObjectAligner
+from object_aligner._matchtypes import ScoreContext
+from object_aligner._metrics import context_metric
 from object_aligner.attribution import AttributionEntry, AttributionResult, tree_walk_attribution
 from object_aligner.describe import (
     DEFAULT_DESCRIPTION_TEMPLATES,
@@ -37,6 +39,8 @@ __all__ = [
     "ObjectAligner",
     "RepairOp",
     "RepairResult",
+    "ScoreContext",
+    "context_metric",
     "generate_repairs",
     "load_templates_from_toml",
     "render_description",

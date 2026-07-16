@@ -132,6 +132,53 @@ class _IdScope:
     degraded: bool = False
 
 
+@dataclass(frozen=True)
+class ScoreContext:
+    """Extra context handed to an opt-in custom leaf comparator.
+
+    A plain custom metric has the signature ``(gold, pred) -> float``. A
+    metric that also needs to see beyond the two leaf values it is
+    comparing — a sibling field, or a value at the root of the object —
+    can opt in to a three-argument signature ``(gold, pred, context) ->
+    float`` by carrying a truthy ``wants_context`` attribute (set it with
+    the [`context_metric`][object_aligner.context_metric] decorator).
+    When it does, `ObjectAligner` builds one of these and passes it as
+    the third argument.
+
+    All fields are **read-only views** into the objects being aligned:
+    they are the live references, not copies. Do not mutate them. A
+    comparator that mutates a parent or root breaks determinism — the
+    same metric runs many times over the same objects while a list is
+    matched, so a mutation would make the result depend on evaluation
+    order.
+
+    Attributes:
+        gold_parent: The container (dict or list) immediately enclosing
+            the gold leaf being scored, or `None` when the leaf is the
+            top-level value passed to `align()` / `metric()`.
+        pred_parent: The container immediately enclosing the pred leaf.
+            For a leaf inside an object this is the enclosing dict, so a
+            sibling field is `pred_parent["sibling"]`.
+        gold_root: The gold object passed to `align()` / `metric()`.
+            Lets a comparator reach an absolute field regardless of
+            nesting depth.
+        pred_root: The pred object passed to `align()` / `metric()`.
+        path: Tuple of navigation steps (dict keys as `str`, list
+            indices as `int`) from `gold_root` to this leaf, on the gold
+            side. Under `order: "align"` lists, fixed-order skips, or
+            fuzzy key matching the paired pred element may sit at a
+            different index/key — the path reflects gold; the paired pred
+            value is always the `pred` argument and pred siblings come
+            from `pred_parent`.
+    """
+
+    gold_parent: Any = None
+    pred_parent: Any = None
+    gold_root: Any = None
+    pred_root: Any = None
+    path: tuple = ()
+
+
 @dataclass
 class _AlignContext:
     """Per-call state for an ``align()`` invocation.
@@ -150,6 +197,8 @@ class _AlignContext:
     compute_confidence: bool = False
     confidence_method: str = "margin"
     confidence_temperature: float = 8.0
+    gold_root: Any = None
+    pred_root: Any = None
 
 
 def to_python_value(value):

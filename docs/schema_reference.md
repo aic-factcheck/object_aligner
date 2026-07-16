@@ -14,7 +14,7 @@ This is a complete reference of all schema keywords recognized by Object Aligner
 
 All standard JSON Schema validation keywords (e.g., `required`, `additionalProperties`, `minItems`, `maxItems`, `enum`, etc.) are also accepted and used during validation in `metric()`, but they do **not** affect alignment behavior.
 
-Custom primitive metrics are supplied through `ObjectAligner(..., custom_metrics=...)`, not as inline callables in the schema.
+Custom primitive metrics are supplied through `ObjectAligner(..., custom_metrics=...)`, not as inline callables in the schema. A metric may optionally opt in to a richer signature that also sees a sibling field or the object root — see [Context-aware custom metrics](#context-aware-custom-metrics) below.
 
 ---
 
@@ -37,7 +37,7 @@ Custom primitive metrics are supplied through `ObjectAligner(..., custom_metrics
 | `"indel"` | Indel normalized similarity | Insert/delete-oriented matching |
 | `"lcsseq"` | Longest-common-subsequence normalized similarity | Sequence overlap matters more than exact edits |
 | `"exact"` | `1.0 if a == b else 0.0` | Enum values, IDs, categorical strings |
-| custom name | User-provided `(gold, pred) -> float` | Semantic similarity or domain-specific scoring |
+| custom name | User-provided `(gold, pred) -> float` (or `(gold, pred, context)` — see below) | Semantic similarity or domain-specific scoring |
 
 ---
 
@@ -55,13 +55,17 @@ Custom primitive metrics are supplied through `ObjectAligner(..., custom_metrics
 | `"invdiff"` | `1 / (1 + |a - b|)` | Small-integer domains where a difference of 1 is meaningful (counts, days). Depends on the field's absolute scale. |
 | `"relative"` | `1 - min(1, |a - b| / max(|a|, |b|))`; equal values → `1.0` | Quantities with arbitrary magnitude (prices, measurements) — scale-invariant |
 | `"exact"` | `1.0 if a == b else 0.0` | Categorical integers, identifiers |
-| custom name | User-provided `(gold, pred) -> float` | Domain-specific numeric scoring |
+| custom name | User-provided `(gold, pred) -> float` (or `(gold, pred, context)` — see below) | Domain-specific numeric scoring |
 
 For integer schemas, custom metric lookup checks the `integer` registry first and then falls back to the `number` registry.
 
 ### Custom metric name collisions
 
 Custom `score` names registered via `custom_metrics` must not collide with the built-in metric names for the same schema type (e.g. `"exact"`, `"jaro"`, `"invdiff"`). Registering a custom metric whose name shadows a built-in raises `ValueError` at `ObjectAligner` construction.
+
+### Context-aware custom metrics
+
+A custom metric is normally called `(gold, pred) -> float`. A metric whose correctness depends on a **sibling field** or a value at the **object root** can opt in to `(gold, pred, context) -> float` by carrying `wants_context = True` (set it with the `context_metric` decorator). `context` is a `ScoreContext` exposing `gold_parent` / `pred_parent` (the enclosing dict/list), `gold_root` / `pred_root` (the objects passed to `metric()` / `align()`), and `path`. Plain 2-arg metrics are unaffected. See [Context-aware custom metrics](primitives.md#context-aware-custom-metrics) for a worked example.
 
 ---
 

@@ -10,16 +10,30 @@ import numpy as np
 from scipy.optimize import linear_sum_assignment
 
 from object_aligner._confidence import _hungarian_confidence, _with_confidence
-from object_aligner._matchtypes import MatchDict, MatchItem, MatchList, to_python_value
+from object_aligner._matchtypes import MatchDict, MatchItem, MatchList, ScoreContext, to_python_value
 from object_aligner._metrics import _schema_allows_type, similarity_exact, similarity_string_jaro
 
 
 class _CoreAlignMixin:
-    def _align_primitive(self, g, p, schema, *, schema_type, default_score):
+    def _align_primitive(self, g, p, schema, *, schema_type, default_score, ctx, gold_parent, pred_parent, path):
         score_type = schema.get("score", default_score)
         threshold = schema.get("threshold", 0.0)
         scoref = self._resolve_primitive_metric(schema_type, score_type)
-        score = self._validate_metric_score(schema_type, score_type, scoref(g, p))
+        if getattr(scoref, "wants_context", False):
+            # Opt-in three-argument metric: hand it a read-only view of the
+            # enclosing parents and the aligned roots. Built lazily so plain
+            # (gold, pred) metrics pay nothing.
+            sc = ScoreContext(
+                gold_parent=gold_parent,
+                pred_parent=pred_parent,
+                gold_root=ctx.gold_root,
+                pred_root=ctx.pred_root,
+                path=path,
+            )
+            raw = scoref(g, p, sc)
+        else:
+            raw = scoref(g, p)
+        score = self._validate_metric_score(schema_type, score_type, raw)
         score = 0.0 if score < threshold else score
         return {"gold": g, "pred": p, "match": MatchItem(score=score, gold=g, pred=p)}
 
@@ -35,7 +49,7 @@ class _CoreAlignMixin:
             D += 1
         return D
 
-    def _align_numbers(self, g, p, schema):
+    def _align_numbers(self, g, p, schema, ctx, *, gold_parent, pred_parent, path):
         # Resolve the primitive type when the schema declares a union
         # (e.g. `type: ["integer", "null"]`): pick the numeric branch and
         # ignore "null", which only governs the null-aware leaf above.
@@ -44,12 +58,18 @@ class _CoreAlignMixin:
             primitive_type = "integer" if "integer" in schema_type else "number"
         else:
             primitive_type = schema_type
-        return self._align_primitive(g, p, schema, schema_type=primitive_type, default_score="invdiff")
+        return self._align_primitive(
+            g, p, schema, schema_type=primitive_type, default_score="invdiff",
+            ctx=ctx, gold_parent=gold_parent, pred_parent=pred_parent, path=path,
+        )
 
-    def _align_strings(self, g, p, schema):
-        return self._align_primitive(g, p, schema, schema_type="string", default_score="jaro")
+    def _align_strings(self, g, p, schema, ctx, *, gold_parent, pred_parent, path):
+        return self._align_primitive(
+            g, p, schema, schema_type="string", default_score="jaro",
+            ctx=ctx, gold_parent=gold_parent, pred_parent=pred_parent, path=path,
+        )
 
-    def _align_lists_reorder(self, gold, pred, schema, ctx):
+    def _align_lists_reorder(self, gold, pred, schema, ctx, *, gold_parent, pred_parent, path, index_offset=0):
         n, m = len(gold), len(pred)
         d = max(n, m)
 
@@ -61,7 +81,11 @@ class _CoreAlignMixin:
 
         for i in range(n):
             for j in range(m):
-                aligned = self._align_helper(gold[i], pred[j], schema["items"], ctx)
+                aligned = self._align_helper(
+                    gold[i], pred[j], schema["items"], ctx,
+                    gold_parent=gold_parent, pred_parent=pred_parent,
+                    path=path + (index_offset + i,),
+                )
                 similarity_matrix[i][j] = aligned["match"].score
                 subs[i][j] = (aligned["gold"], aligned["pred"], aligned["match"])
 
@@ -123,7 +147,7 @@ class _CoreAlignMixin:
         score = max(0.0, min(1.0, score))
         return {"gold": aligned_gold, "pred": aligned_pred, "match": MatchList(score=score, children=aligned_scores, kind="reorder", confidence=node_conf)}
 
-    def _align_lists_fixed(self, gold, pred, schema, ctx):
+    def _align_lists_fixed(self, gold, pred, schema, ctx, *, gold_parent, pred_parent, path, index_offset=0):
         n, m = len(gold), len(pred)
         if n == 0 and m == 0:
             return {"gold": [], "pred": [], "match": MatchList(score=1.0, children=[], kind="fixed")}
@@ -150,7 +174,11 @@ class _CoreAlignMixin:
 
         for i in range(1, n + 1):
             for j in range(1, m + 1):
-                aligned = self._align_helper(gold[i - 1], pred[j - 1], schema["items"], ctx)
+                aligned = self._align_helper(
+                    gold[i - 1], pred[j - 1], schema["items"], ctx,
+                    gold_parent=gold_parent, pred_parent=pred_parent,
+                    path=path + (index_offset + (i - 1),),
+                )
                 match = dp[i - 1][j - 1] + aligned["match"].score
                 skip_pred = dp[i - 1][j]
                 skip_gold = dp[i][j - 1]
@@ -232,7 +260,7 @@ class _CoreAlignMixin:
             node_conf = 1.0
         return {"gold": aligned_gold, "pred": aligned_pred, "match": MatchList(score=score, children=aligned_scores, kind="fixed", confidence=node_conf)}
 
-    def _align_lists_prefix(self, gold, pred, schema, ctx):
+    def _align_lists_prefix(self, gold, pred, schema, ctx, *, gold_parent, pred_parent, path):
         aligned_gold = []
         aligned_pred = []
         aligned_matches = []
@@ -243,7 +271,11 @@ class _CoreAlignMixin:
             p_present = i < len(pred)
             present.append(g_present or p_present)
             if g_present and p_present:
-                aligned = self._align_helper(gold[i], pred[i], sub_schema, ctx)
+                aligned = self._align_helper(
+                    gold[i], pred[i], sub_schema, ctx,
+                    gold_parent=gold_parent, pred_parent=pred_parent,
+                    path=path + (i,),
+                )
                 aligned_gold.append(aligned["gold"])
                 aligned_pred.append(aligned["pred"])
                 aligned_matches.append(aligned["match"])
@@ -282,24 +314,38 @@ class _CoreAlignMixin:
             node_conf = 1.0
         return {"gold": aligned_gold, "pred": aligned_pred, "match": MatchList(score=score, children=aligned_matches, kind="prefix", confidence=node_conf)}
 
-    def _align_lists(self, g, p, schema, ctx):
+    def _align_lists(self, g, p, schema, ctx, *, path=()):
         if "prefixItems" not in schema and "items" not in schema:
             raise ValueError("array schema must declare 'prefixItems' or 'items'")
 
+        # Slicing g/p below produces fresh list copies. A leaf comparator's
+        # parent must be the *original* list (right identity, un-offset
+        # indices), so pass g/p — not the slices — as the parent, and give
+        # the rest-list aligners an index_offset so their child paths use
+        # positions relative to the full list.
         rets = []
         prefix_len = 0
         if "prefixItems" in schema:
             prefix_len = len(schema["prefixItems"])
-            rets.append(self._align_lists_prefix(g[:prefix_len], p[:prefix_len], schema, ctx))
+            rets.append(self._align_lists_prefix(
+                g[:prefix_len], p[:prefix_len], schema, ctx,
+                gold_parent=g, pred_parent=p, path=path,
+            ))
 
         if "items" in schema:
             ordering = schema.get("order", "fixed")
             if ordering not in ("align", "fixed"):
                 raise ValueError(f"'order' must be 'align' or 'fixed', got {ordering!r}")
             if ordering == "fixed":
-                rets.append(self._align_lists_fixed(g[prefix_len:], p[prefix_len:], schema, ctx))
+                rets.append(self._align_lists_fixed(
+                    g[prefix_len:], p[prefix_len:], schema, ctx,
+                    gold_parent=g, pred_parent=p, path=path, index_offset=prefix_len,
+                ))
             else:
-                rets.append(self._align_lists_reorder(g[prefix_len:], p[prefix_len:], schema, ctx))
+                rets.append(self._align_lists_reorder(
+                    g[prefix_len:], p[prefix_len:], schema, ctx,
+                    gold_parent=g, pred_parent=p, path=path, index_offset=prefix_len,
+                ))
 
         if len(rets) == 1:
             return rets[0]
@@ -325,7 +371,7 @@ class _CoreAlignMixin:
             combined_conf = 1.0
         return {"gold": gold, "pred": pred, "match": MatchList(score=score, children=children, kind="combined", confidence=combined_conf)}
 
-    def _align_dicts(self, g, p, schema, ctx):
+    def _align_dicts(self, g, p, schema, ctx, *, path=()):
         match_key = schema.get("keyScore", "jaro")
         if match_key not in ("exact", "jaro"):
             raise ValueError(f"'keyScore' must be 'exact' or 'jaro', got {match_key!r}")
@@ -430,7 +476,10 @@ class _CoreAlignMixin:
                         # Null-aware: delegate to _align_helper, which routes
                         # through `_align_null` and consults this property's
                         # `nullScore` (default 0.0).
-                        aligned_value = self._align_helper(ag, ap, aux_schema, ctx)
+                        aligned_value = self._align_helper(
+                        ag, ap, aux_schema, ctx,
+                        gold_parent=g, pred_parent=p, path=path + (gk,),
+                    )
                     else:
                         # Soft-zero: a fuzzily paired or union-typed value
                         # whose Python types differ scores 0 rather than
@@ -438,7 +487,10 @@ class _CoreAlignMixin:
                         # schema-valid inputs.
                         aligned_value = {"gold": ag, "pred": ap, "match": MatchItem(score=0.0, gold=ag, pred=ap)}
                 else:
-                    aligned_value = self._align_helper(ag, ap, aux_schema, ctx)
+                    aligned_value = self._align_helper(
+                        ag, ap, aux_schema, ctx,
+                        gold_parent=g, pred_parent=p, path=path + (gk,),
+                    )
             else:
                 aligned_value = {"gold": ag, "pred": ap, "match": MatchItem(score=0.0, gold=ag, pred=ap)}
                 value_weights.append(1.0)
@@ -489,7 +541,7 @@ class _CoreAlignMixin:
             score = float(schema.get("nullScore", 0.0)) if isinstance(schema, dict) else 0.0
         return {"gold": g, "pred": p, "match": MatchItem(score=score, gold=g, pred=p, kind="null")}
 
-    def _align_helper(self, g, p, schema, ctx):
+    def _align_helper(self, g, p, schema, ctx, *, gold_parent=None, pred_parent=None, path=()):
         if isinstance(schema, dict):
             if schema.get("idScope") is not None:
                 return {"gold": g, "pred": p, "match": MatchItem(score=1.0, gold=g, pred=p, kind="id")}
@@ -534,19 +586,19 @@ class _CoreAlignMixin:
         elif isinstance(g, (int, float)):
             if not (_schema_allows_type(schema_type, "number") or _schema_allows_type(schema_type, "integer")):
                 raise TypeError(f"schema declares type={schema_type!r} but data is {type(g).__name__}")
-            aligned = self._align_numbers(g, p, schema)
+            aligned = self._align_numbers(g, p, schema, ctx, gold_parent=gold_parent, pred_parent=pred_parent, path=path)
         elif isinstance(g, str):
             if not _schema_allows_type(schema_type, "string"):
                 raise TypeError(f"schema declares type={schema_type!r} but data is str")
-            aligned = self._align_strings(g, p, schema)
+            aligned = self._align_strings(g, p, schema, ctx, gold_parent=gold_parent, pred_parent=pred_parent, path=path)
         elif isinstance(g, list):
             if not _schema_allows_type(schema_type, "array"):
                 raise TypeError(f"schema declares type={schema_type!r} but data is list")
-            aligned = self._align_lists(g, p, schema, ctx)
+            aligned = self._align_lists(g, p, schema, ctx, path=path)
         elif isinstance(g, dict):
             if not _schema_allows_type(schema_type, "object"):
                 raise TypeError(f"schema declares type={schema_type!r} but data is dict")
-            aligned = self._align_dicts(g, p, schema, ctx)
+            aligned = self._align_dicts(g, p, schema, ctx, path=path)
         else:
             raise TypeError(f"unsupported data type: {type(g).__name__}")
 

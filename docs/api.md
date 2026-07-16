@@ -45,7 +45,7 @@ See [`docs/concepts.md`](../concepts.md) for the architectural tour.
 **Parameters**
 
 - **`schema`** — JSON-Schema-inspired dict describing the structure and scoring of the objects to be aligned. See [`docs/schema_reference.md`](../schema_reference.md) for the full list of supported keywords.
-- **`custom_metrics`** — Optional mapping from schema type (`"string"` / `"number"` / `"integer"`) to a mapping of `name -> callable(gold, pred) -> float in [0, 1]`. Integer schemas use built-in number metrics and fall back to custom `number` metrics unless overridden by a custom `integer` metric with the same name. Boolean scoring is exact-only and cannot be customized.
+- **`custom_metrics`** — Optional mapping from schema type (`"string"` / `"number"` / `"integer"`) to a mapping of `name -> callable(gold, pred) -> float in [0, 1]`. Integer schemas use built-in number metrics and fall back to custom `number` metrics unless overridden by a custom `integer` metric with the same name. Boolean scoring is exact-only and cannot be customized. A metric that also needs a sibling field or a value at the root of the object can opt in to the richer signature `callable(gold, pred, context) -> float` by carrying `wants_context = True` (set it with the `context_metric` decorator); `context` is a `ScoreContext` exposing `gold_parent` / `pred_parent` / `gold_root` / `pred_root` / `path`. See [`docs/primitives.md`](../primitives.md).
 - **`generate_description`** — Default for the `generate_description` parameter of `metric()`. When truthy, `metric()` returns include a `"description"` key. Accepts `True` / `False` / `"full"`; see [`docs/describe.md`](../describe.md).
 - **`description_templates`** — Optional partial override of the packaged description templates. Unknown keys or unknown placeholders raise `ValueError`.
 - **`description_style`** — One of the registered description styles (default `"default"`). Controls whether the renderer produces prose (`"default"`) or empty `.text` plus populated `.entries` (`"json"`).
@@ -788,6 +788,77 @@ yields `FeedbackEntry`s in visible-rank order.
 Type: `dict`. Dict with 30 keys.
 
 Default template strings live under `src/object_aligner/templates/`. Import this name and pass it (or an override dict) into `ObjectAligner(...)` to customize.
+
+---
+
+## Other
+
+### `ScoreContext`
+<!-- anchor: scorecontext -->
+
+```python
+ScoreContext(gold_parent: Any = None, pred_parent: Any = None, gold_root: Any = None, pred_root: Any = None, path: tuple = ()) -> None
+```
+
+Extra context handed to an opt-in custom leaf comparator.
+
+A plain custom metric has the signature ``(gold, pred) -> float``. A
+metric that also needs to see beyond the two leaf values it is
+comparing — a sibling field, or a value at the root of the object —
+can opt in to a three-argument signature ``(gold, pred, context) ->
+float`` by carrying a truthy ``wants_context`` attribute (set it with
+the [`context_metric`][object_aligner.context_metric] decorator).
+When it does, `ObjectAligner` builds one of these and passes it as
+the third argument.
+
+All fields are **read-only views** into the objects being aligned:
+they are the live references, not copies. Do not mutate them. A
+comparator that mutates a parent or root breaks determinism — the
+same metric runs many times over the same objects while a list is
+matched, so a mutation would make the result depend on evaluation
+order.
+
+**Fields**
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `gold_parent` | `Any` | None | The container (dict or list) immediately enclosing the gold leaf being scored, or `None` when the leaf is the top-level value passed to `align()` / `metric()`. |
+| `pred_parent` | `Any` | None | The container immediately enclosing the pred leaf. For a leaf inside an object this is the enclosing dict, so a sibling field is `pred_parent["sibling"]`. |
+| `gold_root` | `Any` | None | The gold object passed to `align()` / `metric()`. Lets a comparator reach an absolute field regardless of nesting depth. |
+| `pred_root` | `Any` | None | The pred object passed to `align()` / `metric()`. |
+| `path` | `tuple` | () | Tuple of navigation steps (dict keys as `str`, list indices as `int`) from `gold_root` to this leaf, on the gold side. Under `order: "align"` lists, fixed-order skips, or fuzzy key matching the paired pred element may sit at a different index/key — the path reflects gold; the paired pred value is always the `pred` argument and pred siblings come from `pred_parent`. |
+
+### `context_metric`
+<!-- anchor: context_metric -->
+
+```python
+context_metric(fn)
+```
+
+Mark a custom metric as context-aware and return it unchanged.
+
+A plain custom metric is called ``fn(gold, pred)``. Decorating it with
+``@context_metric`` sets ``fn.wants_context = True``, which tells
+`ObjectAligner` to call it as ``fn(gold, pred, context)`` instead,
+where ``context`` is a
+[`ScoreContext`][object_aligner.ScoreContext] exposing the enclosing
+parent objects and the aligned roots. Use it when a leaf's correctness
+depends on a sibling field or on a value elsewhere in the object.
+
+The decorator mutates the callable in place and returns the same
+object, so any other attributes it carries (for example the ``.cache``
+attached by the semantic metrics) are preserved. Because it assigns an
+attribute, it works on any callable that accepts attribute assignment —
+plain functions, lambdas, `functools.partial`, and instances of
+callable classes all do. The rare exception is a C-level builtin (e.g.
+``str.upper``), which cannot hold attributes; wrap it in a plain
+function first.
+
+**Parameters**
+
+- **`fn`** — The custom metric callable, with signature ``(gold, pred, context) -> float in [0, 1]``.
+
+**Returns** — The same callable, now carrying ``wants_context = True``.
 
 ---
 

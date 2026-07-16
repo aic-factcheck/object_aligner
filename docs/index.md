@@ -18,6 +18,9 @@ solves this by:
 - 🧬 Offering opt-in **semantic similarity** for strings — embedding-based cosine scoring (with
   caching and batching) so paraphrases like `"car"` vs. `"automobile"` get partial credit
   beyond surface form (see [Semantic Similarity](semantic.md)).
+- 🧠 Letting **custom comparators** opt in to see a **sibling field or the object root**, not
+  just the two values being compared — for fields whose correctness depends on context (see
+  [Context-aware custom metrics](primitives.md#context-aware-custom-metrics)).
 - 🧮 Using the **Hungarian algorithm** for unordered collections and dictionary keys, and
   **sequence alignment** for ordered ones.
 - 🕸️ Scoring cross-referenced records (graphs / hypergraphs) **up to identifier renumbering**.
